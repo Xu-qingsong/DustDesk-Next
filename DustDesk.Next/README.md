@@ -2,15 +2,6 @@
 
 一个面向 Windows 的本地桌面工作台。它把桌面整理、待办任务、便签、项目管理、快捷启动、链接、剪贴板历史、文件搜索和桌面小组件集中到一个轻量应用中。
 
-推荐的 GitHub 仓库名：`DustDesk-Next`
-
-## 项目来源与参考
-
-本项目参考并重构自 [Abyxs/DustDesk-Desktop-Manager](https://github.com/Abyxs/DustDesk-Desktop-Manager)。
-
-原项目是 C# / .NET / WinForms 版本；本项目是在保留核心使用场景和本地数据迁移方向的基础上，重新实现的 .NET 10 WPF 版本。旧版代码仍保留在上级目录，新版代码位于当前 `DustDesk.Next` 目录，二者可以独立构建。
-
-本项目的界面、ViewModel、服务层、桌面小组件和数据存储实现经过重新组织，并增加了快速命令、跨模块创建、任务筛选、剪贴板筛选、布局方案和桌面整理多级撤销等功能。原项目的名称、代码和资源权利归原作者及其适用许可证所有。
 
 ## 功能
 
@@ -69,12 +60,6 @@ Release 构建：
 dotnet build .\DustDesk.Next.slnx -c Release --no-restore
 ```
 
-运行测试：
-
-```powershell
-dotnet test ..\DustDesk.Next.Tests\DustDesk.Next.Tests.csproj -c Release --no-restore
-```
-
 ## 数据位置
 
 默认数据目录：
@@ -125,9 +110,8 @@ Controls/     自定义控件
 
 当前项目处于持续开发阶段。核心功能已经可以构建和运行，Release 构建及现有自动化测试均已验证通过。桌面整理会真实移动文件，使用前建议先确认数据目录和备份设置。
 
-## 许可证与致谢
+## 致谢
 
-当前目录未附带独立许可证文件。公开发布前，请根据原项目许可证、代码来源和新增代码的授权情况补充合适的 `LICENSE` 文件，并确认发布内容符合原项目的许可要求。
 
 特别感谢原项目作者 [Abyxs](https://github.com/Abyxs) 及 [DustDesk-Desktop-Manager](https://github.com/Abyxs/DustDesk-Desktop-Manager) 提供的产品思路和功能基础。
 
