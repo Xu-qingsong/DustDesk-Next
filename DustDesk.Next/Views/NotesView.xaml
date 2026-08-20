@@ -1,0 +1,176 @@
+<UserControl x:Class="DustDesk.Next.Views.NotesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="NoteSwatchStyle" TargetType="Button">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+            <Setter Property="BorderBrush" Value="#36000000" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Swatch" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3" />
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Swatch" Property="BorderBrush" Value="{StaticResource PrimaryBrush}" /><Setter TargetName="Swatch" Property="BorderThickness" Value="2" /></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Swatch" Property="BorderBrush" Value="{StaticResource PrimaryBrush}" /><Setter TargetName="Swatch" Property="BorderThickness" Value="2" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NoteToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="Padding" Value="9,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="ToggleRoot" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ToggleRoot" Property="Background" Value="{StaticResource SurfaceMutedBrush}" /></Trigger>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="ToggleRoot" Property="Background" Value="{StaticResource PrimarySoftBrush}" /><Setter TargetName="ToggleRoot" Property="BorderBrush" Value="{StaticResource PrimaryBrush}" /><Setter Property="Foreground" Value="{StaticResource PrimaryBrush}" /></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ToggleRoot" Property="BorderBrush" Value="{StaticResource PrimaryBrush}" /><Setter TargetName="ToggleRoot" Property="BorderThickness" Value="2" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NoteToolLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionStyle}">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="34,30,34,34" MaxWidth="1180" HorizontalAlignment="Stretch">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="便签" Style="{StaticResource PageTitleStyle}" />
+                <TextBlock Text="在一个地方整理所有临时记录。" Style="{StaticResource CaptionStyle}" Margin="0,5,0,0" FontSize="14" />
+            </StackPanel>
+            <WrapPanel Grid.Column="1"><Button Content="新建便签" Command="{Binding AddNoteCommand}" Style="{StaticResource PrimaryButtonStyle}" /><Button Content="创建任务" Command="{Binding CreateTaskFromSelectedCommand}" Margin="8,0,0,0" Padding="12,7" /></WrapPanel>
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="0,24,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="260" /><ColumnDefinition Width="16" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+
+            <Border Style="{StaticResource MainGlassPanelStyle}" Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock Text="全部便签" Style="{StaticResource SectionTitleStyle}" Margin="18,18,18,8" />
+                    <TextBox Grid.Row="1" Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource MainGlassInputStyle}" Margin="18,0,18,10" ToolTip="搜索便签" />
+                    <ListBox Grid.Row="2" ItemsSource="{Binding FilteredNotes}" SelectedItem="{Binding SelectedNote}" BorderThickness="0" HorizontalContentAlignment="Stretch">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="14,10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding UpdatedAt, StringFormat=更新于 {0:MM-dd HH:mm}}" Style="{StaticResource CaptionStyle}" FontSize="11" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Command="{Binding DataContext.DeleteNoteCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource IconButtonStyle}" ToolTip="删除便签" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource MainGlassPanelStyle}" Background="{Binding SelectedNote.ColorArgb, Converter={StaticResource ArgbToBrushConverter}}" BorderBrush="#D9C67A">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Border BorderBrush="#24000000" BorderThickness="0,0,0,1" Padding="0,0,0,8">
+                        <TextBox Text="{Binding SelectedNote.Title, UpdateSourceTrigger=PropertyChanged}" Background="Transparent" BorderThickness="0" FontSize="22" FontWeight="SemiBold" Foreground="{Binding SelectedNote.FontColorArgb, Converter={StaticResource ArgbToBrushConverter}}" Padding="0" VerticalContentAlignment="Center" />
+                    </Border>
+
+                    <Border Grid.Row="1" Background="#5CFFFFFF" BorderBrush="#22000000" BorderThickness="1" CornerRadius="4" Margin="0,12,0,12" Padding="10,8">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+
+                            <WrapPanel VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,18,6">
+                                    <TextBlock Text="底色" Style="{StaticResource NoteToolLabelStyle}" />
+                                    <Button Command="{Binding SetColorCommand}" CommandParameter="FFFFE9A8" Background="#FFFFE9A8" Style="{StaticResource NoteSwatchStyle}" ToolTip="黄色" AutomationProperties.Name="黄色便签" />
+                                    <Button Command="{Binding SetColorCommand}" CommandParameter="FFE1F4EF" Background="#FFE1F4EF" Style="{StaticResource NoteSwatchStyle}" ToolTip="绿色" AutomationProperties.Name="绿色便签" />
+                                    <Button Command="{Binding SetColorCommand}" CommandParameter="FFE8F0FF" Background="#FFE8F0FF" Style="{StaticResource NoteSwatchStyle}" ToolTip="蓝色" AutomationProperties.Name="蓝色便签" />
+                                    <Button Command="{Binding SetColorCommand}" CommandParameter="FFFFE8E8" Background="#FFFFE8E8" Style="{StaticResource NoteSwatchStyle}" ToolTip="红色" AutomationProperties.Name="红色便签" />
+                                    <Button Content="&#xE790;" FontFamily="Segoe Fluent Icons" Command="{Binding ChooseColorCommand}" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" ToolTip="自定义便签颜色" />
+                                    <Button Content="透明" Command="{Binding SetTransparentColorCommand}" Height="30" Padding="9,0" Margin="5,0,0,0" />
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,18,6">
+                                    <TextBlock Text="文字" Style="{StaticResource NoteToolLabelStyle}" />
+                                    <ToggleButton Content="B" FontWeight="Bold" IsChecked="{Binding SelectedNote.FontBold}" Style="{StaticResource NoteToggleStyle}" ToolTip="粗体" AutomationProperties.Name="粗体" />
+                                    <TextBlock Text="字号" Style="{StaticResource NoteToolLabelStyle}" Margin="14,0,7,0" />
+                                    <Slider Value="{Binding SelectedNote.FontSize}" Minimum="8" Maximum="42" Width="96" TickFrequency="2" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding SelectedNote.FontSize, StringFormat={}{0:F0}}" Width="28" TextAlignment="Right" VerticalAlignment="Center" Margin="5,0,0,0" />
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,6">
+                                    <TextBlock Text="字色" Style="{StaticResource NoteToolLabelStyle}" />
+                                    <Button Command="{Binding SetFontColorCommand}" CommandParameter="FF2C261C" Background="#FF2C261C" Style="{StaticResource NoteSwatchStyle}" ToolTip="深色文字" AutomationProperties.Name="深色文字" />
+                                    <Button Command="{Binding SetFontColorCommand}" CommandParameter="FFFFFFFF" Background="White" Style="{StaticResource NoteSwatchStyle}" ToolTip="白色文字" AutomationProperties.Name="白色文字" />
+                                    <Button Content="&#xE790;" FontFamily="Segoe Fluent Icons" Command="{Binding ChooseFontColorCommand}" Style="{StaticResource IconButtonStyle}" Width="30" Height="30" ToolTip="自定义字体颜色" />
+                                </StackPanel>
+                            </WrapPanel>
+
+                            <Border Grid.Row="1" Height="1" Background="#18000000" Margin="0,2,0,8" />
+
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <WrapPanel VerticalAlignment="Center">
+                                    <Button Command="{Binding ChooseBackgroundCommand}" Height="30" Padding="10,0" Margin="0,0,6,0" ToolTip="选择背景图片">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE91B;" FontFamily="Segoe Fluent Icons" Margin="0,0,6,0" /><TextBlock Text="背景图片" /></StackPanel>
+                                    </Button>
+                                    <Button Command="{Binding ClearBackgroundCommand}" Height="30" Padding="10,0" Margin="0,0,10,0" ToolTip="清除背景图片">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE74D;" FontFamily="Segoe Fluent Icons" Margin="0,0,6,0" /><TextBlock Text="清除背景" /></StackPanel>
+                                    </Button>
+                                    <ToggleButton IsChecked="{Binding SelectedNote.ImageOnly}" Style="{StaticResource NoteToggleStyle}" ToolTip="只显示背景图片">
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE91B;" FontFamily="Segoe Fluent Icons" Margin="0,0,6,0" /><TextBlock Text="仅图片" /></StackPanel>
+                                    </ToggleButton>
+                                </WrapPanel>
+                                <Button Grid.Column="1" Command="{Binding PinSelectedNoteCommand}" Height="30" Padding="11,0" ToolTip="固定到桌面">
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE840;" FontFamily="Segoe Fluent Icons" Margin="0,0,6,0" /><TextBlock Text="固定到桌面" /></StackPanel>
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Row="2">
+                        <Image Source="{Binding SelectedNote.BackgroundImagePath}" Stretch="UniformToFill">
+                            <Image.Style><Style TargetType="Image"><Setter Property="Opacity" Value="0.22" /><Style.Triggers><DataTrigger Binding="{Binding SelectedNote.ImageOnly}" Value="True"><Setter Property="Opacity" Value="1" /></DataTrigger></Style.Triggers></Style></Image.Style>
+                        </Image>
+                        <TextBox Text="{Binding SelectedNote.Text, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Background="Transparent" BorderThickness="0" Padding="0" FontSize="{Binding SelectedNote.FontSize}" Foreground="{Binding SelectedNote.FontColorArgb, Converter={StaticResource ArgbToBrushConverter}}">
+                            <TextBox.Style><Style TargetType="TextBox"><Setter Property="FontWeight" Value="Normal" /><Style.Triggers><DataTrigger Binding="{Binding SelectedNote.FontBold}" Value="True"><Setter Property="FontWeight" Value="Bold" /></DataTrigger><DataTrigger Binding="{Binding SelectedNote.ImageOnly}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></TextBox.Style>
+                        </TextBox>
+                    </Grid>
+
+                    <Grid Grid.Row="3" Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="内容自动保存到本机" Foreground="#796A35" FontSize="12" /><TextBlock Grid.Column="1" Text="{Binding BackgroundStatusText}" Foreground="{StaticResource DangerBrush}" FontSize="12" /></Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

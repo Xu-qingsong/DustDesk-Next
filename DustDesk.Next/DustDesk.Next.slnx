@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="DustDesk.Next.csproj" />
+  <Project Path="..\DustDesk.Next.Tests\DustDesk.Next.Tests.csproj" />
+</Solution>

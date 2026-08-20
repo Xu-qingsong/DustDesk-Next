@@ -1,0 +1,101 @@
+<UserControl x:Class="DustDesk.Next.Widgets.SearchWidgetView"
+             x:Name="Root"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid x:Name="LayoutRoot" Background="Transparent">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+
+        <Border x:Name="CapsuleBorder" Grid.Row="0" Height="52" Background="Transparent" CornerRadius="26">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="BorderBrush" Value="{StaticResource SearchBorderBrush}" />
+                    <Setter Property="BorderThickness" Value="1" />
+                    <Style.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+                            <Setter Property="BorderThickness" Value="2" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <Grid Margin="5,4,38,4">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="42" /><ColumnDefinition Width="*" /><ColumnDefinition Width="32" /></Grid.ColumnDefinitions>
+                <Border x:Name="CapsuleDragHandle" Background="Transparent" Cursor="SizeAll"
+                        PreviewMouseLeftButtonDown="DragHandle_OnMouseLeftButtonDown"
+                        PreviewMouseMove="DragHandle_OnMouseMove"
+                        PreviewMouseLeftButtonUp="DragHandle_OnMouseLeftButtonUp"
+                        LostMouseCapture="DragHandle_OnLostMouseCapture">
+                    <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons" FontSize="17" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" />
+                </Border>
+                <TextBox x:Name="QueryBox" Grid.Column="1"
+                         Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}"
+                         Background="Transparent" BorderThickness="0" Padding="2,0"
+                         FontSize="14" VerticalContentAlignment="Center"
+                         ToolTip="搜索文件、应用和工作区内容"
+                         AutomationProperties.Name="桌面搜索"
+                         PreviewMouseLeftButtonDown="QueryBox_OnPreviewMouseLeftButtonDown"
+                         PreviewKeyDown="QueryBox_OnPreviewKeyDown" />
+                <Button x:Name="CloseCapsuleButton" Grid.Column="2" Content="&#xE711;" FontFamily="Segoe Fluent Icons"
+                        Style="{StaticResource IconButtonStyle}" Width="30" Height="30" ToolTip="收起搜索" Click="CloseCapsule_OnClick" />
+            </Grid>
+        </Border>
+
+        <Border x:Name="CircleButton" Grid.RowSpan="2" Width="52" Height="52" CornerRadius="26" Background="Transparent"
+                Cursor="Hand" Visibility="Collapsed"
+                PreviewMouseLeftButtonDown="DragHandle_OnMouseLeftButtonDown"
+                PreviewMouseMove="DragHandle_OnMouseMove"
+                PreviewMouseLeftButtonUp="CircleButton_OnMouseLeftButtonUp"
+                LostMouseCapture="DragHandle_OnLostMouseCapture"
+                ToolTip="打开搜索">
+            <TextBlock Text="&#xE721;" FontFamily="Segoe Fluent Icons" FontSize="19" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" />
+        </Border>
+
+        <Border x:Name="ResultsPanel" Grid.Row="1" Margin="5,0,5,5" Background="#F8FFFFFF" BorderBrush="#25000000" BorderThickness="1" CornerRadius="6" Visibility="Collapsed">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <Grid Margin="12,9,12,7">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="搜索结果" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="{Binding StatusText}" Style="{StaticResource CaptionStyle}" />
+                </Grid>
+                <ListBox Grid.Row="1" ItemsSource="{Binding Results}" BorderThickness="0" Background="Transparent" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalAlignment" Value="Stretch" /><Setter Property="HorizontalContentAlignment" Value="Stretch" /><Setter Property="Padding" Value="0" /></Style></ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Button Command="{Binding DataContext.OpenResultCommand, ElementName=Root}"
+                                    CommandParameter="{Binding}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                    Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                    Background="Transparent" BorderThickness="0" Padding="10,8"
+                                    Tag="{Binding DataContext, ElementName=Root}" Cursor="Hand">
+                                <Button.ContextMenu>
+                                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}" Tag="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+                                        <MenuItem Header="打开" FontWeight="SemiBold" Command="{Binding Tag.OpenResultCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <MenuItem Header="系统菜单" Command="{Binding Tag.ShowResultMenuCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
+                                            <MenuItem.Style>
+                                                <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding DataContext.PageKey, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="tasks"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding DataContext.PageKey, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="notes"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding DataContext.PageKey, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="projects"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                                        <DataTrigger Binding="{Binding DataContext.PageKey, RelativeSource={RelativeSource AncestorType=ContextMenu}}" Value="organizer"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </MenuItem.Style>
+                                        </MenuItem>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition Width="*" /><ColumnDefinition Width="72" /></Grid.ColumnDefinitions>
+                                    <Image Source="{Binding Path, Converter={StaticResource FileIconConverter}}" Width="22" Height="22" />
+                                    <StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" /><TextBlock Text="{Binding Path}" Style="{StaticResource CaptionStyle}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,2,8,0" /></StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding Kind}" Style="{StaticResource CaptionStyle}"
+                                               HorizontalAlignment="Stretch" TextAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
