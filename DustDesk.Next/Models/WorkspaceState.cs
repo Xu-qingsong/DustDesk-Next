@@ -251,6 +251,13 @@ public static class WorkspaceDefaults
         state.Settings.WidgetLayoutPresets ??= new Dictionary<string, Dictionary<string, WidgetPlacementRecord>>(StringComparer.OrdinalIgnoreCase);
         state.Settings.NoteWidgetPlacements ??= new();
         state.Settings.OrganizerGroupWidgetPlacements ??= new();
+        var noteIds = state.Notes.Select(note => note.Id).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        state.Settings.NoteWidgetPlacements.RemoveAll(placement => !noteIds.Contains(placement.NoteId));
+        foreach (var key in state.Settings.WidgetPlacements.Keys
+                     .Where(key => key.StartsWith("note:", StringComparison.OrdinalIgnoreCase))
+                     .Where(key => !noteIds.Contains(key[5..]))
+                     .ToList())
+            state.Settings.WidgetPlacements.Remove(key);
         if (state.Notes.Count == 0) state.Notes.Add(new NoteRecord { Title = "快速便签", Text = state.QuickNote });
         if (state.LinkGroups.Count == 0) state.LinkGroups.Add(new LinkGroupRecord { Name = "常用" });
         if (state.DesktopCategories.Count == 0)

@@ -3,6 +3,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="{Binding Workspace.DisplayName}"
+                 Icon="/DustDesk.Next;component/Assets/DustDeskLogo.png"
                  Width="1320"
                  Height="840"
                  MinWidth="1024"
@@ -113,12 +114,8 @@
                         <ColumnDefinition Width="38" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border Width="34" Height="34" CornerRadius="7" Background="#E61C2525" VerticalAlignment="Center">
-                        <Grid>
-                            <TextBlock Text="D" Foreground="White" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" />
-                            <Border Width="4" Height="4" Margin="0,0,5,5" HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                    Background="{StaticResource PrimaryBrush}" CornerRadius="2" />
-                        </Grid>
+                    <Border Width="34" Height="34" CornerRadius="7" Background="Transparent" VerticalAlignment="Center" ClipToBounds="True">
+                        <Image Source="/DustDesk.Next;component/Assets/DustDeskLogo.png" Stretch="Uniform" />
                     </Border>
                     <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Workspace.DisplayName}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />

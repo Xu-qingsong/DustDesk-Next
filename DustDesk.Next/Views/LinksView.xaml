@@ -6,13 +6,13 @@
         <Style x:Key="LinkOpenButtonStyle" TargetType="Button">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="Padding" Value="9,6" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Stretch" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="OpenRoot" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="5,0,0,5">
+                        <Border x:Name="OpenRoot" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="7,0,0,7">
                             <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -27,7 +27,7 @@
 
         <Style x:Key="LinkGroupTabStyle" TargetType="TabItem">
             <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
-            <Setter Property="Padding" Value="15,9" />
+            <Setter Property="Padding" Value="13,7" />
             <Setter Property="Margin" Value="2,3,2,0" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -103,7 +103,7 @@
                     Style="{StaticResource IconButtonStyle}" Foreground="{StaticResource DangerBrush}" ToolTip="删除当前分组" />
         </Grid>
 
-        <Border Grid.Row="2" Style="{StaticResource MainGlassPanelStyle}" Padding="0">
+        <Border Grid.Row="2" Style="{StaticResource MainGlassPanelStyle}" Padding="0" BorderBrush="Transparent" BorderThickness="0">
             <TabControl ItemsSource="{Binding Groups}"
                         SelectedItem="{Binding SelectedGroup}"
                         ItemContainerStyle="{StaticResource LinkGroupTabStyle}"
@@ -131,28 +131,51 @@
                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                                      ScrollViewer.CanContentScroll="False"
-                                     Padding="8">
+                                      Padding="6">
                                 <ListBox.ItemsPanel>
                                     <ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top" /></ItemsPanelTemplate>
                                 </ListBox.ItemsPanel>
                                 <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem">
-                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                        <Setter Property="VerticalContentAlignment" Value="Stretch" />
-                                        <Setter Property="Padding" Value="0" />
-                                        <Setter Property="Margin" Value="5" />
-                                        <Setter Property="Background" Value="Transparent" />
-                                    </Style>
+                                     <Style TargetType="ListBoxItem">
+                                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                         <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                         <Setter Property="Padding" Value="0" />
+                                         <Setter Property="Margin" Value="4" />
+                                         <Setter Property="Background" Value="Transparent" />
+                                         <Setter Property="BorderBrush" Value="Transparent" />
+                                         <Setter Property="BorderThickness" Value="0" />
+                                         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                         <Setter Property="Template">
+                                             <Setter.Value>
+                                                 <ControlTemplate TargetType="ListBoxItem">
+                                                     <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                                                 </ControlTemplate>
+                                             </Setter.Value>
+                                         </Setter>
+                                     </Style>
                                 </ListBox.ItemContainerStyle>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <Border MinHeight="94" BorderThickness="1" CornerRadius="6">
+                                        <Border MinHeight="70" BorderThickness="0" BorderBrush="Transparent" CornerRadius="7">
                                             <Border.Style>
                                                 <Style TargetType="Border">
                                                     <Setter Property="Background" Value="#A6FFFFFF" />
-                                                    <Setter Property="BorderBrush" Value="#9FFFFFFF" />
+                                                    <Setter Property="BorderBrush" Value="Transparent" />
+                                                    <Setter Property="Effect">
+                                                        <Setter.Value>
+                                                            <DropShadowEffect BlurRadius="18" ShadowDepth="3" Direction="270" Opacity="0.07" Color="#33434A" />
+                                                        </Setter.Value>
+                                                    </Setter>
                                                     <Style.Triggers>
-                                                        <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#E6FFFFFF" /><Setter Property="BorderBrush" Value="#C7CFD2" /></Trigger>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" Value="#E6FFFFFF" />
+                                                            <Setter Property="Effect">
+                                                                <Setter.Value>
+                                                                    <DropShadowEffect BlurRadius="22" ShadowDepth="4" Direction="270" Opacity="0.11" Color="#33434A" />
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </Trigger>
                                                     </Style.Triggers>
                                                 </Style>
                                             </Border.Style>
@@ -178,7 +201,7 @@
                                                         <StackPanel Grid.Column="1">
                                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextAlignment="Left" TextTrimming="CharacterEllipsis" />
                                                             <TextBlock Text="{Binding Url}" Style="{StaticResource CaptionStyle}" FontSize="11" Margin="0,3,0,0" TextAlignment="Left" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="{Binding Note}" Style="{StaticResource CaptionStyle}" Margin="0,3,0,0" TextAlignment="Left" TextTrimming="CharacterEllipsis" />
+                                                             <TextBlock Text="{Binding Note}" Style="{StaticResource CaptionStyle}" Margin="0,2,0,0" TextAlignment="Left" TextTrimming="CharacterEllipsis" MaxHeight="18" />
                                                         </StackPanel>
                                                     </Grid>
                                                 </Button>

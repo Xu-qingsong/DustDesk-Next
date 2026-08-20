@@ -38,49 +38,48 @@ public partial class NotesViewModel : ObservableObject
     [ObservableProperty] private string _searchQuery = string.Empty;
     partial void OnSearchQueryChanged(string value) => RefreshFilteredNotes();
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanCreateTaskFromSelected))]
     private void CreateTaskFromSelected()
     {
         if (SelectedNote is null || string.IsNullOrWhiteSpace(SelectedNote.Text)) return;
         _tasks.CreateFromText(SelectedNote.Text);
     }
 
+    private bool CanCreateTaskFromSelected() => SelectedNote is not null && !string.IsNullOrWhiteSpace(SelectedNote.Text);
+
     public NoteItemViewModel CreateFromText(string text)
     {
+        text ??= string.Empty;
         var title = text.ReplaceLineEndings(" ").Trim();
         if (title.Length > 80) title = title[..80];
-        var record = new NoteRecord { Title = string.IsNullOrWhiteSpace(title) ? "新便签" : title, Text = text.Trim() };
-        Workspace.State.Notes.Add(record);
-        var item = AddWrapped(record);
-        SelectedNote = item;
-        RefreshFilteredNotes();
-        Workspace.MarkChanged();
-        return item;
+        return AddNoteRecord(string.IsNullOrWhiteSpace(title) ? "新便签" : title, text.Trim());
     }
 
     [ObservableProperty] private NoteItemViewModel? _selectedNote;
     [ObservableProperty] private string _backgroundStatusText = string.Empty;
+    public bool HasSelectedNote => SelectedNote is not null;
+
+    partial void OnSelectedNoteChanged(NoteItemViewModel? value)
+    {
+        OnPropertyChanged(nameof(HasSelectedNote));
+        CreateTaskFromSelectedCommand.NotifyCanExecuteChanged();
+        PinSelectedNoteCommand.NotifyCanExecuteChanged();
+    }
 
     [RelayCommand]
     private void AddNote()
     {
-        var record = new NoteRecord { Title = $"便签 {Notes.Count + 1}" };
-        Workspace.State.Notes.Add(record);
-        SelectedNote = AddWrapped(record);
-        RefreshFilteredNotes();
-        Workspace.MarkChanged();
+        AddNoteRecord(NextNoteTitle(), string.Empty);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanDeleteNote))]
     private void DeleteNote(NoteItemViewModel? item)
     {
-        if (item is null || Notes.Count <= 1)
-        {
-            return;
-        }
+        if (item is null) return;
         if (!ConfirmationDialog.ConfirmDelete("这条便签")) return;
 
-        var index = Notes.IndexOf(item);
+        var wasSelected = ReferenceEquals(SelectedNote, item);
+        var filteredIndex = FilteredNotes.IndexOf(item);
         var widgetKey = $"note:{item.Id}";
         _widgets.Hide(widgetKey);
         Workspace.State.Settings.WidgetPlacements.Remove(widgetKey);
@@ -89,10 +88,17 @@ public partial class NotesViewModel : ObservableObject
         Notes.Remove(item);
         Workspace.State.Notes.Remove(item.Record);
         DeleteManagedBackground(item.Record);
-        SelectedNote = Notes[Math.Clamp(index, 0, Notes.Count - 1)];
         RefreshFilteredNotes();
+        if (wasSelected)
+        {
+            SelectedNote = FilteredNotes.Count == 0
+                ? null
+                : FilteredNotes[Math.Clamp(filteredIndex, 0, FilteredNotes.Count - 1)];
+        }
         Workspace.MarkChanged();
     }
+
+    private bool CanDeleteNote(NoteItemViewModel? item) => item is not null;
 
     [RelayCommand]
     private void ChooseBackground()
@@ -171,27 +177,51 @@ public partial class NotesViewModel : ObservableObject
         SelectedNote.FontColorArgb = unchecked((int)Convert.ToUInt32(value, 16));
     }
 
-    private NoteItemViewModel AddWrapped(NoteRecord record)
+    private NoteItemViewModel AddWrapped(NoteRecord record, bool insertFirst = false)
     {
         var item = new NoteItemViewModel(record);
         item.PropertyChanged += OnNoteChanged;
-        Notes.Add(item);
+        if (insertFirst) Notes.Insert(0, item);
+        else Notes.Add(item);
         return item;
+    }
+
+    private NoteItemViewModel AddNoteRecord(string title, string text)
+    {
+        var record = new NoteRecord { Title = title, Text = text };
+        Workspace.State.Notes.Insert(0, record);
+        var item = AddWrapped(record, insertFirst: true);
+        SelectedNote = item;
+        RefreshFilteredNotes();
+        Workspace.MarkChanged();
+        return item;
+    }
+
+    private string NextNoteTitle()
+    {
+        var used = Notes.Select(note => note.Title.Trim()).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+        for (var number = 1; ; number++)
+        {
+            var candidate = $"便签 {number}";
+            if (!used.Contains(candidate)) return candidate;
+        }
     }
 
     private void OnNoteChanged(object? sender, PropertyChangedEventArgs e)
     {
         Workspace.MarkChanged();
-        if (e.PropertyName is nameof(NoteItemViewModel.Title) or nameof(NoteItemViewModel.Text)) RefreshFilteredNotes();
     }
 
     private void RefreshFilteredNotes()
     {
+        var selected = SelectedNote;
         var query = SearchQuery.Trim();
         FilteredNotes.Clear();
         foreach (var note in Notes.Where(note => string.IsNullOrWhiteSpace(query) || note.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) || note.Text.Contains(query, StringComparison.CurrentCultureIgnoreCase)))
             FilteredNotes.Add(note);
-        if (SelectedNote is not null && !FilteredNotes.Contains(SelectedNote)) SelectedNote = FilteredNotes.FirstOrDefault();
+        SelectedNote = selected is not null && FilteredNotes.Contains(selected)
+            ? selected
+            : FilteredNotes.FirstOrDefault();
     }
 
     private void ResolveManagedBackground(NoteRecord record)

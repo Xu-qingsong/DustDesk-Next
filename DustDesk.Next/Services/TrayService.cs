@@ -9,14 +9,29 @@ public sealed class TrayService : ITrayService
         menu.Items.Add("显示 DustDesk", null, (_, _) => ShowRequested?.Invoke());
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("退出", null, (_, _) => ExitRequested?.Invoke());
+        var appIcon = TryGetApplicationIcon();
         _icon = new System.Windows.Forms.NotifyIcon
         {
             Text = "DustDesk",
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = appIcon,
             ContextMenuStrip = menu,
             Visible = true
         };
         _icon.DoubleClick += (_, _) => ShowRequested?.Invoke();
+    }
+    private static System.Drawing.Icon TryGetApplicationIcon()
+    {
+        try
+        {
+            var path = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                var icon = System.Drawing.Icon.ExtractAssociatedIcon(path);
+                if (icon is not null) return icon;
+            }
+        }
+        catch { }
+        return System.Drawing.SystemIcons.Application;
     }
     public event Action? ShowRequested;
     public event Action? ExitRequested;
