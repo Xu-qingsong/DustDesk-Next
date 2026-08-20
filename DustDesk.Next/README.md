@@ -112,7 +112,5 @@ Controls/     自定义控件
 
 ## 致谢
 
-
 特别感谢原项目作者 [Abyxs](https://github.com/Abyxs) 及 [DustDesk-Desktop-Manager](https://github.com/Abyxs/DustDesk-Desktop-Manager) 提供的产品思路和功能基础。
 
-完整迁移矩阵和验证记录见 [MIGRATION.md](MIGRATION.md)。
