@@ -1,0 +1,146 @@
+<UserControl x:Class="DustDesk.Next.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <DataTemplate x:Key="TwoDigitNumberTemplate">
+            <TextBlock Text="{Binding StringFormat={}{0:00}}" TextWrapping="NoWrap" />
+        </DataTemplate>
+        <Style x:Key="CountdownComboBoxStyle" TargetType="ComboBox">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="8,4" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </UserControl.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="34,30,34,34" MaxWidth="1000" HorizontalAlignment="Stretch">
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <StackPanel><TextBlock Text="设置" Style="{StaticResource PageTitleStyle}" /><TextBlock Text="管理启动、快捷键、本地数据和搜索范围。" Style="{StaticResource CaptionStyle}" Margin="0,5,0,0" FontSize="14" /></StackPanel>
+            <Border Grid.Row="1" Style="{StaticResource MainGlassPanelStyle}" Margin="0,24,0,14"><StackPanel><TextBlock Text="启动与后台" Style="{StaticResource SectionTitleStyle}" /><Grid Margin="0,18,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="工作台名称" Style="{StaticResource CaptionStyle}" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding Workspace.DisplayName, UpdateSourceTrigger=PropertyChanged}" MaxLength="32" Style="{StaticResource MainGlassInputStyle}" /></Grid><CheckBox Content="开机启动 DustDesk" IsChecked="{Binding StartWithWindows}" Margin="0,0,0,10" /><CheckBox Content="启动后隐藏到托盘" IsChecked="{Binding StartHiddenToTray}" Margin="0,0,0,10" /><CheckBox Content="记录剪贴板历史" IsChecked="{Binding ClipboardMonitoringEnabled}" /></StackPanel></Border>
+            <Border Grid.Row="2" Style="{StaticResource MainGlassPanelStyle}" Margin="0,0,0,14">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <TextBlock Text="快捷键与组件" Style="{StaticResource SectionTitleStyle}" />
+                    <Grid Grid.Row="1" Height="44" Margin="0,18,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="主窗口快捷键" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" />
+                        <TextBox Grid.Column="1" VerticalAlignment="Center" Text="{Binding MainWindowHotKey, UpdateSourceTrigger=LostFocus}" Style="{StaticResource MainGlassInputStyle}" />
+                    </Grid>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Grid Height="44" VerticalAlignment="Top"><TextBlock Text="桌面组件快捷键" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" /></Grid>
+                        <StackPanel Grid.Column="1">
+                            <Grid Height="44"><TextBox VerticalAlignment="Center" Text="{Binding DesktopWidgetsHotKey, UpdateSourceTrigger=LostFocus}" Style="{StaticResource MainGlassInputStyle}" /></Grid>
+                            <TextBlock Text="组件透明度" Style="{StaticResource CaptionStyle}" Margin="0,14,0,6" />
+                            <Slider Value="{Binding WidgetOpacityPercent}" Minimum="20" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True" />
+                            <TextBlock Text="组件背景色" Style="{StaticResource CaptionStyle}" Margin="0,14,0,7" />
+                            <StackPanel Orientation="Horizontal"><Border Width="30" Height="30" Margin="0,0,8,0" CornerRadius="4" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="{Binding WidgetBackgroundColorArgb, Converter={StaticResource ArgbToBrushConverter}}" ToolTip="当前颜色" /><Button Width="30" Height="30" MinHeight="0" Padding="0" Margin="0,0,6,0" Background="#FFFFFFFF" BorderBrush="#B8C1C5" Command="{Binding SetWidgetBackgroundColorCommand}" CommandParameter="FFFFFFFF" ToolTip="默认白色" AutomationProperties.Name="默认白色" /><Button Width="30" Height="30" MinHeight="0" Padding="0" Margin="0,0,6,0" Background="#FFF0F2F3" BorderBrush="#B8C1C5" Command="{Binding SetWidgetBackgroundColorCommand}" CommandParameter="FFF0F2F3" ToolTip="雾灰" AutomationProperties.Name="雾灰" /><Button Width="30" Height="30" MinHeight="0" Padding="0" Margin="0,0,6,0" Background="#FFE0F3EC" BorderBrush="#9DBCB1" Command="{Binding SetWidgetBackgroundColorCommand}" CommandParameter="FFE0F3EC" ToolTip="薄荷" AutomationProperties.Name="薄荷" /><Button Width="30" Height="30" MinHeight="0" Padding="0" Margin="0,0,6,0" Background="#FFFFF1C7" BorderBrush="#CBBE91" Command="{Binding SetWidgetBackgroundColorCommand}" CommandParameter="FFFFF1C7" ToolTip="淡黄" AutomationProperties.Name="淡黄" /><Button Width="30" Height="30" MinHeight="0" Padding="0" Margin="0,0,6,0" Background="#FFE5EFFB" BorderBrush="#A6B7CC" Command="{Binding SetWidgetBackgroundColorCommand}" CommandParameter="FFE5EFFB" ToolTip="浅蓝" AutomationProperties.Name="浅蓝" /><Button Width="30" Height="30" MinHeight="0" Padding="0" Margin="0,0,6,0" Background="#FFF0E9F8" BorderBrush="#B9AAC8" Command="{Binding SetWidgetBackgroundColorCommand}" CommandParameter="FFF0E9F8" ToolTip="浅紫" AutomationProperties.Name="浅紫" /><Button Width="30" Height="30" MinHeight="0" Padding="0" Content="&#xE790;" FontFamily="Segoe Fluent Icons" Command="{Binding ChooseWidgetBackgroundColorCommand}" ToolTip="自定义颜色" AutomationProperties.Name="自定义颜色" /></StackPanel>
+                            <TextBlock Text="桌面组件" Style="{StaticResource CaptionStyle}" Margin="0,14,0,8" />
+                            <ItemsControl ItemsSource="{Binding WidgetOptions}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding Label}" Command="{Binding DataContext.ToggleWidgetCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Key}" Padding="12,7" Margin="0,0,8,8" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                            <TextBlock Text="布局方案" Style="{StaticResource CaptionStyle}" Margin="0,14,0,6" />
+                            <WrapPanel><TextBox Text="{Binding LayoutPresetName, UpdateSourceTrigger=PropertyChanged}" Width="150" Style="{StaticResource MainGlassInputStyle}" /><Button Content="保存布局" Command="{Binding SaveLayoutPresetCommand}" Margin="8,0,0,0" Padding="10,6" /><ComboBox ItemsSource="{Binding LayoutPresetNames}" SelectedItem="{Binding LayoutPresetName}" Width="150" Margin="8,0,0,0" /><Button Content="应用" Command="{Binding ApplyLayoutPresetCommand}" CommandParameter="{Binding LayoutPresetName}" Margin="8,0,0,0" Padding="10,6" /><Button Content="删除" Command="{Binding DeleteLayoutPresetCommand}" CommandParameter="{Binding LayoutPresetName}" Margin="8,0,0,0" Padding="10,6" /></WrapPanel>
+                            <TextBlock Text="快捷键控制组件" Style="{StaticResource CaptionStyle}" Margin="0,8,0,8" />
+                            <ItemsControl ItemsSource="{Binding WidgetOptions}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Label}" IsChecked="{Binding IsHotKeyTarget}" Margin="0,0,18,8" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+            <Border Grid.Row="3" Style="{StaticResource MainGlassPanelStyle}" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="组件显示" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBlock Text="快捷启动" FontWeight="SemiBold" Margin="0,16,0,8" />
+                    <Grid Height="32" HorizontalAlignment="Left"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions><CheckBox Content="吸附屏幕边缘" IsChecked="{Binding LauncherSnapToEdges}" VerticalAlignment="Center" Margin="0,0,18,0" /><CheckBox Grid.Column="1" Content="显示名称" IsChecked="{Binding Launchers.ShowNames}" VerticalAlignment="Center" Margin="0,0,18,0" /><TextBlock Grid.Column="2" Text="图标大小" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" Margin="0,0,8,0" /><Slider Grid.Column="3" Value="{Binding Launchers.IconSize}" Minimum="34" Maximum="64" Width="150" VerticalAlignment="Center" TickFrequency="2" IsSnapToTickEnabled="True" /></Grid>
+                    <TextBlock Text="桌面收纳" FontWeight="SemiBold" Margin="0,12,0,8" />
+                    <Grid Height="32" HorizontalAlignment="Left"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions><CheckBox Content="显示名称" IsChecked="{Binding Organizer.ShowNames}" VerticalAlignment="Center" Margin="0,0,18,0" /><TextBlock Grid.Column="1" Text="图标大小" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" Margin="0,0,8,0" /><Slider Grid.Column="2" Value="{Binding Organizer.IconSize}" Minimum="34" Maximum="64" Width="150" VerticalAlignment="Center" TickFrequency="2" IsSnapToTickEnabled="True" /></Grid>
+                    <TextBlock Text="系统检测组件" FontWeight="SemiBold" Margin="0,14,0,8" />
+                    <WrapPanel><CheckBox Content="CPU" IsChecked="{Binding Monitor.ShowCpu}" Margin="0,0,18,8" /><CheckBox Content="内存" IsChecked="{Binding Monitor.ShowMemory}" Margin="0,0,18,8" /><CheckBox Content="下载" IsChecked="{Binding Monitor.ShowDownload}" Margin="0,0,18,8" /><CheckBox Content="上传" IsChecked="{Binding Monitor.ShowUpload}" Margin="0,0,18,8" /><CheckBox Content="磁盘读写" IsChecked="{Binding Monitor.ShowDiskIo}" Margin="0,0,18,8" /><CheckBox Content="磁盘空间" IsChecked="{Binding Monitor.ShowDiskSpace}" Margin="0,0,18,8" /><CheckBox Content="延迟" IsChecked="{Binding Monitor.ShowPing}" Margin="0,0,18,8" /><CheckBox Content="运行时长" IsChecked="{Binding Monitor.ShowUptime}" Margin="0,0,18,8" /></WrapPanel>
+
+                    <TextBlock Text="下班倒计时" FontWeight="SemiBold" Margin="0,18,0,10" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="240" />
+                            <ColumnDefinition Width="36" />
+                            <ColumnDefinition Width="110" />
+                            <ColumnDefinition Width="240" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="32" />
+                            <RowDefinition Height="44" />
+                            <RowDefinition Height="44" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Text="工作时间" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" />
+                        <WrapPanel Grid.Column="1" Grid.ColumnSpan="5" VerticalAlignment="Center">
+                            <ComboBox ItemsSource="{Binding Countdown.Hours}" SelectedItem="{Binding Countdown.StartHour}" ItemTemplate="{StaticResource TwoDigitNumberTemplate}" Width="70" Style="{StaticResource CountdownComboBoxStyle}" />
+                            <TextBlock Text=":" Width="22" TextAlignment="Center" />
+                            <ComboBox ItemsSource="{Binding Countdown.Minutes}" SelectedItem="{Binding Countdown.StartMinute}" ItemTemplate="{StaticResource TwoDigitNumberTemplate}" Width="70" Style="{StaticResource CountdownComboBoxStyle}" />
+                            <TextBlock Text="至" Width="48" TextAlignment="Center" />
+                            <ComboBox ItemsSource="{Binding Countdown.Hours}" SelectedItem="{Binding Countdown.EndHour}" ItemTemplate="{StaticResource TwoDigitNumberTemplate}" Width="70" Style="{StaticResource CountdownComboBoxStyle}" />
+                            <TextBlock Text=":" Width="22" TextAlignment="Center" />
+                            <ComboBox ItemsSource="{Binding Countdown.Minutes}" SelectedItem="{Binding Countdown.EndMinute}" ItemTemplate="{StaticResource TwoDigitNumberTemplate}" Width="70" Style="{StaticResource CountdownComboBoxStyle}" />
+                        </WrapPanel>
+
+                        <TextBlock Grid.Row="1" Text="税前月薪" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" />
+                        <TextBox Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Text="{Binding Countdown.MonthlySalary, UpdateSourceTrigger=LostFocus}" Style="{StaticResource MainGlassInputStyle}" ToolTip="用于计算今日收入" />
+                        <TextBlock Grid.Row="1" Grid.Column="3" Text="每月发薪日" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" />
+                        <ComboBox Grid.Row="1" Grid.Column="4" VerticalAlignment="Center" ItemsSource="{Binding Countdown.PaydayDays}" SelectedItem="{Binding Countdown.PaydayDay}" Style="{StaticResource CountdownComboBoxStyle}" />
+
+                        <TextBlock Grid.Row="2" Text="倒数日期名称" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" />
+                        <TextBox Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Text="{Binding Countdown.FestivalName, UpdateSourceTrigger=LostFocus}" MaxLength="12" Style="{StaticResource MainGlassInputStyle}" />
+                        <TextBlock Grid.Row="2" Grid.Column="3" Text="每年日期" VerticalAlignment="Center" Style="{StaticResource CaptionStyle}" />
+                        <DatePicker Grid.Row="2" Grid.Column="4" Height="32" VerticalAlignment="Center" SelectedDate="{Binding Countdown.FestivalDate}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+            <Border Grid.Row="4" Style="{StaticResource MainGlassPanelStyle}" Margin="0,0,0,14">
+                <StackPanel>
+                    <TextBlock Text="本地数据与搜索目录" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBlock Text="{Binding DataFilePath}" Style="{StaticResource CaptionStyle}" Margin="0,16,0,8" />
+                    <WrapPanel><Button Content="打开数据位置" Command="{Binding OpenDataLocationCommand}" /><Button Content="备份" Command="{Binding BackupCommand}" Margin="8,0,0,0" /><Button Content="恢复备份" Command="{Binding RestoreCommand}" Margin="8,0,0,0" /><Button Content="恢复全部收纳" Command="{Binding RestoreDesktopItemsCommand}" Margin="8,0,0,0" /><Button Content="导出项目" Command="{Binding ExportProjectsCommand}" Margin="8,0,0,0" /><Button Content="重置" Command="{Binding ResetCommand}" Margin="8,0,0,0" Foreground="{StaticResource DangerBrush}" /></WrapPanel>
+                    <Grid Margin="0,18,0,0">
+                        <TextBlock Text="自动恢复点" FontWeight="SemiBold" />
+                        <Button HorizontalAlignment="Right" Style="{StaticResource IconButtonStyle}" Content="&#xE72C;" FontFamily="Segoe Fluent Icons" Command="{Binding RefreshRecoveryPointsCommand}" ToolTip="刷新恢复点" AutomationProperties.Name="刷新恢复点" />
+                    </Grid>
+                    <TextBlock Text="{Binding RecoveryStatus}" Style="{StaticResource CaptionStyle}" Margin="0,2,40,8" AutomationProperties.LiveSetting="Polite" />
+                    <ProgressBar Height="2" Margin="0,0,0,6" IsIndeterminate="True" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Grid>
+                        <ListBox x:Name="RecoveryPointList" ItemsSource="{Binding RecoveryPoints}" SelectedItem="{Binding SelectedRecoveryPoint}" MinHeight="48" MaxHeight="176" Background="Transparent" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MinHeight="46" Margin="10,2" ToolTip="{Binding FilePath}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="96" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Detail}" Style="{StaticResource CaptionStyle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                        <Button Grid.Column="2" Content="恢复" Padding="12,5" Command="{Binding DataContext.RestoreRecoveryPointCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" AutomationProperties.Name="恢复此恢复点" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock Text="暂无恢复点" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource CaptionStyle}">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ElementName=RecoveryPointList, Path=HasItems}" Value="False">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                    <TextBlock Text="搜索来源" FontWeight="SemiBold" Margin="0,18,0,8" />
+                    <WrapPanel><CheckBox Content="桌面" IsChecked="{Binding SearchDesktopFiles}" Margin="0,0,18,8" /><CheckBox Content="开始菜单" IsChecked="{Binding SearchStartMenuApps}" Margin="0,0,18,8" /><CheckBox Content="应用数据" IsChecked="{Binding SearchAppData}" Margin="0,0,18,8" /><CheckBox Content="项目路径" IsChecked="{Binding SearchProjectPaths}" Margin="0,0,18,8" /><CheckBox Content="自定义目录" IsChecked="{Binding SearchCustomPaths}" Margin="0,0,18,8" /></WrapPanel>
+                    <Grid Margin="0,10,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="自定义搜索目录" FontWeight="SemiBold" /><WrapPanel Grid.Column="1"><Button Content="清空" Command="{Binding ClearSearchRootsCommand}" Padding="12,7" /><Button Content="添加目录" Command="{Binding AddSearchRootCommand}" Padding="12,7" Margin="6,0,0,0" /></WrapPanel></Grid>
+                    <ItemsControl ItemsSource="{Binding CustomSearchRoots}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" /><Button Grid.Column="1" Content="移除" Command="{Binding DataContext.RemoveSearchRootCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Padding="10,5" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                </StackPanel>
+            </Border>
+            <Border Grid.Row="5" Style="{StaticResource MainGlassPanelStyle}" Margin="0,0,0,30"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="版本、帮助与反馈" Style="{StaticResource SectionTitleStyle}" /><TextBlock Text="{Binding UpdateStatus}" Style="{StaticResource CaptionStyle}" Margin="0,8,0,0" /></StackPanel><WrapPanel Grid.Column="1"><Button Content="操作简介" Command="{Binding ShowHelpCommand}" Padding="14,9" /><Button Content="关于与反馈" Command="{Binding OpenAboutCommand}" Padding="14,9" Margin="8,0,0,0" /><Button Content="检查更新" Command="{Binding CheckUpdateCommand}" Padding="16,9" Margin="8,0,0,0" /></WrapPanel></Grid></Border>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

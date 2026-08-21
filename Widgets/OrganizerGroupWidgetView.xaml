@@ -1,0 +1,144 @@
+<UserControl x:Class="DustDesk.Next.Widgets.OrganizerGroupWidgetView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="OrganizerGroupHeaderStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Foreground" Value="{DynamicResource WidgetTabIdleForegroundBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="HeaderRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="HeaderRoot" Property="Background" Value="{DynamicResource WidgetTabHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="HeaderRoot" Property="Opacity" Value="0.74" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="HeaderRoot" Property="BorderBrush" Value="{DynamicResource WidgetTabAccentBrush}" />
+                                <Setter TargetName="HeaderRoot" Property="BorderThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <ItemsControl ItemsSource="{Binding Categories}">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="0,0,0,14"
+                                AllowDrop="True"
+                                Drop="OnCategoryDrop">
+                        <Button Command="{Binding DataContext.Owner.ToggleCategoryCollapseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}"
+                                Margin="0,0,0,6"
+                                Style="{StaticResource OrganizerGroupHeaderStyle}"
+                                ToolTip="展开或收起分类内容"
+                                AutomationProperties.Name="展开或收起分类内容">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="24" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Name}"
+                                           FontWeight="SemiBold"
+                                           FontSize="14"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Items.Count, StringFormat={}{0} 项}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource WidgetTabAccentBrush}"
+                                           Margin="8,0,4,0" />
+                                <TextBlock Grid.Column="2"
+                                           FontFamily="Segoe Fluent Icons"
+                                           FontSize="13"
+                                           HorizontalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="&#xE70D;" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
+                                                    <Setter Property="Text" Value="&#xE76C;" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </Button>
+                        <ItemsControl ItemsSource="{Binding Items}">
+                            <ItemsControl.Style>
+                                <Style TargetType="ItemsControl">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCollapsed}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ItemsControl.Style>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Padding="7"
+                                            Tag="{Binding DataContext.Owner, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            Command="{Binding DataContext.Owner.OpenEntryCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding}"
+                                            PreviewMouseMove="OnEntryMouseMove"
+                                            HorizontalContentAlignment="Stretch"
+                                            Background="Transparent"
+                                            BorderThickness="0">
+                                        <Button.ContextMenu>
+                                            <ContextMenu FontFamily="Segoe UI Variable, Microsoft YaHei UI"
+                                                         DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                                                         Tag="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+                                                <MenuItem Header="打开"
+                                                          Command="{Binding Tag.OpenEntryCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                <Separator />
+                                                <MenuItem Header="恢复到桌面"
+                                                          Command="{Binding Tag.RestoreAnyEntryCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                          CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="28" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Image Width="20"
+                                                   Height="20"
+                                                   Source="{Binding Path, Converter={StaticResource FileIconConverter}}" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Name}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </ScrollViewer>
+</UserControl>

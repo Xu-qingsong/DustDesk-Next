@@ -1,0 +1,58 @@
+<UserControl x:Class="DustDesk.Next.Widgets.LauncherWidgetView"
+             x:Name="Root"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             AllowDrop="True"
+             Drop="OnDrop">
+    <ItemsControl ItemsSource="{Binding Launchers}">
+        <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+                <WrapPanel />
+            </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+            <DataTemplate>
+                <Button Command="{Binding DataContext.OpenLauncherCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                        CommandParameter="{Binding}"
+                        MinWidth="78"
+                        MinHeight="72"
+                        Margin="4"
+                        Padding="10,8"
+                        ToolTip="{Binding Path}"
+                        Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                    <Button.ContextMenu>
+                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}"
+                                     Tag="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+                            <MenuItem Header="打开"
+                                      FontWeight="SemiBold"
+                                      Command="{Binding Tag.OpenLauncherCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                            <MenuItem Header="系统菜单"
+                                      Command="{Binding Tag.ShowLauncherMenuCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                            <Separator />
+                            <MenuItem Header="更换路径"
+                                      Command="{Binding Tag.ChooseLauncherPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                            <MenuItem Header="删除"
+                                      Foreground="#C2414B"
+                                      Command="{Binding Tag.DeleteLauncherCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                      CommandParameter="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                    <StackPanel>
+                        <Image Source="{Binding Path, Converter={StaticResource FileIconConverter}}"
+                               Width="{Binding DataContext.IconSize, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                               Height="{Binding DataContext.IconSize, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                        <TextBlock Text="{Binding Name}"
+                                   Visibility="{Binding DataContext.ShowNames, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                   TextTrimming="CharacterEllipsis"
+                                   TextAlignment="Center"
+                                   MaxWidth="110"
+                                   Margin="0,5,0,0" />
+                    </StackPanel>
+                </Button>
+            </DataTemplate>
+        </ItemsControl.ItemTemplate>
+    </ItemsControl>
+</UserControl>
