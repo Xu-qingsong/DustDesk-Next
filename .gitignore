@@ -4,3 +4,9 @@ artifacts/
 .vs/
 *.user
 *.suo
+node_modules/
+out/
+release/
+.vite/
+test-artifacts/
+electron/
