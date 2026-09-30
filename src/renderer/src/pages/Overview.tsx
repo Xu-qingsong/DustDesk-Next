@@ -1,0 +1,15 @@
+import { useState } from 'react'
+import { Check, ChevronRight, Clock3, ExternalLink, ListTodo, Plus } from 'lucide-react'
+import type { WorkspaceState } from '../../../shared/types'
+import type { Page } from '../app/navigation'
+import { Empty, PageHeader, Panel } from '../components/common'
+import type { PersistWorkspace } from '../components/common'
+
+export function Overview({ state, persist, onNavigate, onAdd }: { state: WorkspaceState; persist: PersistWorkspace; onNavigate: (page: Page) => void; onAdd: (title: string) => void }) {
+  const openTodos = state.Todos.filter(todo => !todo.IsCompleted)
+  const completed = state.Todos.filter(todo => todo.IsCompleted).length
+  const [title, setTitle] = useState('')
+  const progress = Math.max(0, Math.min(100, Math.round(((new Date().getHours() * 60 + new Date().getMinutes()) - state.Settings.WorkdayStartMinutes) / Math.max(1, state.Settings.WorkdayEndMinutes - state.Settings.WorkdayStartMinutes) * 100)))
+  return <><PageHeader eyebrow="今天的工作台" title={`早上好，${state.Settings.MainWindowDisplayName || 'DustDesk'}`} description="把注意力留给真正重要的事情。" action={<button className="primary-button" onClick={() => onNavigate('tasks')}><ListTodo size={16} />查看任务</button>} /><div className="metrics"><div className="metric"><span>待完成</span><strong>{openTodos.length}</strong><small>件任务</small></div><div className="metric"><span>今日完成</span><strong>{completed}</strong><small>件任务</small></div><div className="metric"><span>便签</span><strong>{state.Notes.length}</strong><small>条记录</small></div><div className="metric accent"><span>工作日进度</span><strong>{progress}%</strong><small>按当前时间估算</small></div></div><div className="overview-grid"><Panel><div className="panel-heading"><h3>今天要做什么</h3><button className="text-button" onClick={() => onNavigate('tasks')}>全部任务 <ChevronRight size={15} /></button></div><div className="quick-add"><input value={title} onChange={event => setTitle(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && title.trim()) { onAdd(title.trim()); setTitle('') } }} placeholder="添加一项任务..." /><button className="round-button" title="添加任务" onClick={() => { if (title.trim()) { onAdd(title.trim()); setTitle('') } }}><Plus size={17} /></button></div><div className="todo-list compact">{openTodos.slice(0, 5).map(todo => <div className="todo-row" key={todo.Id}><span className="todo-check" /><span>{todo.Title}</span>{todo.Tag && <small>{todo.Tag}</small>}</div>)}{!openTodos.length && <Empty icon={Check} title="今天没有未完成任务" description="可以把时间留给更重要的事。" />}</div></Panel><Panel><div className="panel-heading"><h3>快速记录</h3><button className="icon-button subtle" title="打开便签" onClick={() => onNavigate('notes')}><ExternalLink size={16} /></button></div><textarea className="quick-note" defaultValue={state.QuickNote} placeholder="把刚刚想到的事记下来..." onBlur={event => void persist({ ...state, QuickNote: event.target.value }, '快速记录已保存')} /><div className="panel-foot"><span><Clock3 size={14} />自动保存</span><span>{state.Notes.length} 条便签</span></div></Panel></div></> 
+}
+

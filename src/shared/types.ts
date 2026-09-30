@@ -1,3 +1,4 @@
+import type { ProductivityState, ProductivityAction, ActionResult, BackupPreview, ResourceHealth, ResourceScanRequest, ResourceScanProgress } from './productivity'
 export type ReminderRepeat = 'None' | 'Daily' | 'Weekdays' | 'Weekly'
 export type ProjectStatus = 'Todo' | 'Doing' | 'Done'
 export type ClipboardContentKind = 'Text' | 'Image'
@@ -89,6 +90,10 @@ export interface WidgetPlacement {
 }
 
 export interface AppSettings {
+  Theme?: 'light' | 'dark'
+  AutomaticBackupEnabled: boolean
+  BackupRetentionDays: number
+  QuickCaptureHotKey: string
   MainWindowDisplayName: string
   StartHiddenToTray: boolean
   StartWithWindows: boolean
@@ -141,7 +146,7 @@ export interface AppSettings {
   WidgetLayoutPresets: Record<string, Record<string, WidgetPlacement>>
 }
 
-export interface WorkspaceState {
+export interface WorkspaceState extends ProductivityState {
   SchemaVersion: number
   LegacyImportCompleted: boolean
   QuickNote: string
@@ -158,11 +163,21 @@ export interface WorkspaceState {
 }
 
 export interface DustDeskApi {
+  productivity(action: ProductivityAction): Promise<ActionResult>
+  backupStatus(): Promise<{ error: string; lastAutomaticBackupAt: string }>
+  previewBackup(path: string): Promise<BackupPreview>
+  checkResources(request?: ResourceScanRequest): Promise<ResourceHealth[]>
+  cancelResourceCheck(requestId: string): Promise<void>
+  onResourceCheckProgress(callback: (progress: ResourceScanProgress) => void): () => void
+  showQuickCapture(): Promise<void>
+  hideQuickCapture(): Promise<void>
   loadWorkspace(): Promise<WorkspaceState>
-  saveWorkspace(state: WorkspaceState): Promise<{ ok: true; path: string }>
+  saveWorkspace(state: WorkspaceState, baseline?: WorkspaceState): Promise<{ ok: true; path: string }>
+  onBeforeQuit(flush: () => Promise<void>): () => void
   getDataLocation(): Promise<string>
-  pickNoteBackground(): Promise<{ ok: boolean; path?: string; fileName?: string; dataUrl?: string; canceled?: boolean; error?: string }>
-  clearNoteBackground(path: string): Promise<{ ok: boolean; error?: string }>
+  pickNoteBackground(noteId: string, expectedPath?: string | null): Promise<{ ok: boolean; path?: string; fileName?: string; dataUrl?: string; canceled?: boolean; error?: string }>
+  importNoteBackground(noteId: string, source: string, expectedPath?: string | null): Promise<{ ok: boolean; path?: string; error?: string }>
+  clearNoteBackground(noteId: string, expectedPath?: string | null): Promise<{ ok: boolean; error?: string }>
   pickFolder(title?: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   pickPath(title?: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   readImageFile(path: string): Promise<{ ok: boolean; dataUrl?: string; error?: string }>
@@ -171,16 +186,20 @@ export interface DustDeskApi {
   openUrl(url: string): Promise<{ ok: boolean; error?: string }>
   showMainWindow(): Promise<void>
   hideMainWindow(): Promise<void>
-  toggleWidgets(key?: string): Promise<void>
-  hideWidget(key: string): Promise<void>
+  toggleWidgets(key?: string): Promise<{ visible: boolean }>
+  getWidgetVisibility(keys: string[]): Promise<Record<string, boolean>>
+  hideWidget(key: string): Promise<{ ok: boolean; error?: string }>
   setWidgetOptions(key: string, options: { locked?: boolean; topMost?: boolean; transparentBackground?: boolean; autoCollapse?: boolean; collapsed?: boolean; snapToEdges?: boolean; height?: number }): Promise<{ ok: boolean; error?: string }>
+  moveWidget(key: string, x: number, y: number, commit?: boolean): Promise<{ ok: boolean; error?: string }>
   resizeWidget(key: string, width: number, height: number, commit?: boolean): Promise<{ ok: boolean; error?: string }>
   listWidgetPresets(): Promise<string[]>
   saveWidgetPreset(name: string): Promise<{ ok: boolean; error?: string }>
   applyWidgetPreset(name: string): Promise<{ ok: boolean; error?: string }>
   deleteWidgetPreset(name: string): Promise<{ ok: boolean; error?: string }>
-  startScreenshot(mode?: 'Region' | 'Window' | 'FullScreen'): Promise<{ ok: boolean; message?: string; path?: string; dataUrl?: string }>
+  listScreenshotWindows(): Promise<{ ok: boolean; message?: string; sources?: { id: string; name: string; thumbnail: string }[] }>
+  startScreenshot(mode?: 'Region' | 'Window' | 'FullScreen', sourceId?: string): Promise<{ ok: boolean; message?: string; path?: string; dataUrl?: string }>
   onScreenshotOverlaySource(callback: (dataUrl: string) => void): () => void
+  onScreenshotCaptured(callback: (dataUrl: string) => void): () => void
   submitScreenshotOverlay(dataUrl: string): Promise<{ ok: boolean }>
   cancelScreenshotOverlay(): Promise<{ ok: boolean }>
   saveScreenshot(dataUrl: string): Promise<{ ok: boolean; path?: string; error?: string }>
@@ -196,17 +215,18 @@ export interface DustDeskApi {
   setStartupEnabled(enabled: boolean): Promise<void>
   createBackup(): Promise<{ ok: boolean; path?: string; error?: string }>
   listBackups(): Promise<BackupEntry[]>
-  restoreBackup(path?: string): Promise<{ ok: boolean; error?: string }>
+  restoreBackup(path?: string, fingerprint?: string): Promise<{ ok: boolean; error?: string }>
   searchFiles(query: string): Promise<SearchFileResult[]>
-  setHotkeys(keys: { mainWindow?: string; widgets?: string; screenshot?: string; pin?: string }): Promise<{ ok: boolean; error?: string }>
+  setHotkeys(keys: { mainWindow?: string; widgets?: string; screenshot?: string; pin?: string; quickCapture?: string }): Promise<{ ok: boolean; error?: string }>
   exportProjects(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   planSmartOrganize(): Promise<OrganizerPlanItem[]>
-  executeSmartOrganize(): Promise<{ ok: boolean; moved: number; error?: string }>
+  executeSmartOrganize(plan?: OrganizerPlanItem[]): Promise<{ ok: boolean; moved: number; error?: string }>
   undoOrganizerMove(): Promise<{ ok: boolean; error?: string }>
   checkForUpdate(): Promise<{ ok: boolean; available: boolean; version?: string; error?: string }>
   downloadUpdate(): Promise<{ ok: boolean; error?: string }>
   installUpdate(): Promise<{ ok: boolean; error?: string }>
   onWorkspaceChanged(callback: (state: WorkspaceState) => void): () => void
+  onWidgetVisibilityChanged(callback: (key: string, visible: boolean) => void): () => void
   onWidgetAppearance(callback: (appearance: { color: number; alpha: number }) => void): () => void
   platform: NodeJS.Platform
 }

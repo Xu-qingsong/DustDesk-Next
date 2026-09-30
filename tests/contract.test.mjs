@@ -37,6 +37,8 @@ test('widget keys include object and organizer variants', () => {
   const main = read('src/main/index.ts')
   assert.match(main, /note\|project/) 
   assert.match(main, /organizer-group/) 
+  assert.match(main, /widgets:move/)
+  assert.match(main, /widgets:visibility/)
   assert.match(main, /widgets:resize/) 
 })
 
