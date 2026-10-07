@@ -81,17 +81,15 @@
       "icon": "Assets/DustDesk.ico",
       "target": [
         "nsis",
-        "portable"
+        "zip"
       ],
-      "artifactName": "DustDesk-${version}-${arch}.${ext}"
+      "artifactName": "DustDesk-${version}-${arch}-green.${ext}"
     },
     "nsis": {
+      "artifactName": "DustDesk-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
-    },
-    "portable": {
-      "artifactName": "DustDesk-${version}-${arch}-portable.${ext}"
     },
     "publish": {
       "provider": "github",

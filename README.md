@@ -34,7 +34,7 @@ npm run dist
 
 需要不打扰桌面的检查时，运行 `npm run check:silent`。它执行类型检查、Node 测试、构建和无界面页面测试；测试使用实际 preload、IPC 与持久化代码，模拟系统接口，不启动 Electron 窗口、注册真实快捷键或访问系统剪贴板。无界面页面测试使用已安装的 Chromium、Chrome 或 Edge，也可通过 `DUSTDESK_HEADLESS_BROWSER` 指定浏览器路径；没有可用浏览器时会明确跳过该项。`e2e:*` 命令则会启动真实应用窗口。
 
-`dist` 会生成 Windows x64 NSIS 安装包和 portable 包。
+`dist` 会生成 Windows x64 NSIS 安装包和免安装绿色 ZIP。绿色版解压后运行 `DustDesk.exe`，保留压缩包内的全部文件；数据继续保存在下方所列的默认工作区目录。发布规则见 [开发与发布规范](docs/DEVELOPMENT.md)。
 
 ## 数据位置
 

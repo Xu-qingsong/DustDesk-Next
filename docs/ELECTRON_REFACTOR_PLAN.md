@@ -1,5 +1,7 @@
 # DustDesk Electron 重构计划
 
+> 本文保留历史重构与验收记录。当前开发和发布规则以 [DEVELOPMENT.md](DEVELOPMENT.md) 为准；发布产物为安装包 EXE 与免安装绿色 ZIP，历史 portable 产物已停止发布。
+
 > 方案版本：v2.8（2026-08-22）  
 > 当前分支：`refactor/electron`  
 > 当前策略：Electron 作为本分支唯一默认入口；旧 workspace 数据继续兼容读取。

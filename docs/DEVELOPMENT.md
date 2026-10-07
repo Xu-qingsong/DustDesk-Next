@@ -19,6 +19,15 @@
 - 同步更新 `package.json`、`package-lock.json` 中的根包版本、README 的当前版本和本次版本说明。
 - 可以使用 `npm version <版本号> --no-git-tag-version` 同步包版本；验证和打包完成后，再为最终发布提交创建同名标签。
 - 仅推送开发代码不自动创建正式版本；用户要求“推送并打包发布版本”时，需完成代码推送、标签、Release 和附件上传。
+- 用户明确要求调整当前已发布版本的附件时，可修订该版本附件和介绍，不递增应用版本、不移动既有标签；使用原发布代码的打包目录生成替代附件，打包策略与文档改动推送主分支。涉及应用代码改动时应发布新版本。
+
+## 发布产物
+
+- 默认只发布 Windows x64 NSIS 安装包 `DustDesk-X.Y.Z-x64.exe`、免安装绿色版 `DustDesk-X.Y.Z-x64-green.zip` 和 `SHA256SUMS.txt`。
+- 绿色 ZIP 必须包含完整的 Electron 应用目录，解压后直接运行 `DustDesk.exe`，无需安装或运行自解压启动器；不能只打包单个 EXE。
+- 绿色版数据继续保存在 `%AppData%\DustDesk.Next\Data`，与安装版使用相同的默认数据位置；移动或删除解压目录不会迁移或删除工作区。
+- 不生成或上传 `*-portable.exe` 便携启动器。发布时精确选择当前版本文件，禁止使用通配符上传旧产物。
+- 发布前将实际绿色 ZIP 解压至独立测试目录，验证主程序启动、版本显示、数据读取和小组件功能，再核对 ZIP 的 SHA-256。
 
 ## 版本介绍格式
 
@@ -33,7 +42,7 @@
 3. **优化与调整**：可选，列出性能、布局和已有交互的改进。
 4. **破坏性变更**：有不兼容的设置、数据格式、接口或行为变化时必须列出，同时提供升级或回退方法。
 5. **已知问题**：可选，列出仍未解决、会影响用户使用的限制及可行的处理办法。
-6. **下载与安装**：列出本版本安装包、便携包及校验文件名称，说明平台。
+6. **下载与安装**：列出本版本安装包、免安装绿色 ZIP 及校验文件名称，说明平台及解压运行方式。
 
 内容要求：
 
@@ -70,7 +79,7 @@
 ## 下载与安装
 
 - `DustDesk-X.Y.Z-x64.exe`：Windows 10/11 x64 安装包。
-- `DustDesk-X.Y.Z-x64-portable.exe`：Windows 10/11 x64 便携包。
+- `DustDesk-X.Y.Z-x64-green.zip`：Windows 10/11 x64 免安装绿色版，解压后运行 `DustDesk.exe`。
 - `SHA256SUMS.txt`：以上文件的 SHA-256 校验值。
 ```
 
@@ -79,8 +88,8 @@
 1. 确认远程仓库为 `https://github.com/Xu-qingsong/DustDesk-Next`，核对最新正式版本、标签和当前工作区改动。
 2. 按版本规则确定版本，同步包版本、README 和 `docs/releases/v<版本号>.md`。
 3. 执行无窗口检查、相关真实窗口测试；失败必须修复后重试，不将跳过测试写成通过。
-4. 执行 `npm run dist -- --publish never`，生成本版本 Windows x64 NSIS 安装包和便携包。打包时禁止工具自动发布旧目录中的文件。
-5. 执行 `node tests/package-smoke.mjs` 和 `node tests/portable-smoke.mjs` 验证打包后的应用与便携包启动、preload API、显示版本和小组件；测试使用独立数据目录。`DUSTDESK_PACKAGE_EXECUTABLE` 可指定其他解压后的应用主程序。为本版本安装包和便携包生成 `SHA256SUMS.txt`。只上传精确匹配本次版本的产物，不上传旧版本或 `win-unpacked`。
+4. 执行 `npm run dist -- --publish never`，生成本版本 Windows x64 NSIS 安装包和免安装绿色 ZIP。打包时禁止工具自动发布旧目录中的文件。
+5. 执行 `node tests/package-smoke.mjs` 和 `node tests/green-smoke.mjs` 验证打包后的应用与实际绿色 ZIP 解压后的程序启动、preload API、显示版本和小组件；测试使用独立数据目录。`DUSTDESK_PACKAGE_EXECUTABLE` 可指定其他解压后的应用主程序。为本版本安装包和绿色 ZIP 生成 `SHA256SUMS.txt`。只上传精确匹配本次版本的产物，不上传旧版本、便携启动器 EXE 或 `win-unpacked`。
 6. 审核最终差异，提交代码、开发文档和版本说明，将发布提交推送到主分支。若远程分支有新提交，应先处理差异并重新验证，不强制覆盖远程历史。
 7. 为同一提交创建并推送版本标签；创建草稿 Release，上传并核对附件。Release 正文直接读取已提交的版本说明文件。
 8. 确认附件名称、大小及校验值正确后，将草稿设为正式 Release 和最新版本；核对发布页面、标签提交和下载链接。
@@ -89,7 +98,7 @@
 
 ```powershell
 Get-FileHash release/DustDesk-1.0.1-x64.exe -Algorithm SHA256
-Get-FileHash release/DustDesk-1.0.1-x64-portable.exe -Algorithm SHA256
+Get-FileHash release/DustDesk-1.0.1-x64-green.zip -Algorithm SHA256
 ```
 
 开发设计的历史记录见 [Electron 重构计划](ELECTRON_REFACTOR_PLAN.md)；版本发布遵循本文的当前规则。
