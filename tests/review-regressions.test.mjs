@@ -111,7 +111,7 @@ test('project date inputs round-trip in positive and negative time zones', () =>
       assert.equal(localDateIsoValue(''), null);
       assert.equal(localDateInputValue('invalid'), '');
       assert.equal(daysUntilPayday(new Date('2026-03-07T12:00:00'), 10), 3);
-    `], { env: { ...process.env, TZ: timezone }, encoding: 'utf8' })
+    `], { env: { ...process.env, TZ: timezone }, encoding: 'utf8', windowsHide: true })
     assert.equal(result.status, 0, `${timezone}: ${result.stderr}`)
   }
 })

@@ -7,7 +7,8 @@ import ts from 'typescript'
 
 const moduleUrl = source => 'data:text/javascript;base64,' + Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64')
 const paths = moduleUrl(await readFile(new URL('../src/main/fileOperations.ts', import.meta.url), 'utf8'))
-const { createNoteBackgroundManager } = await import(moduleUrl((await readFile(new URL('../src/main/noteBackgrounds.ts', import.meta.url), 'utf8')).replace("'./fileOperations'", JSON.stringify(paths))))
+const validation = moduleUrl(await readFile(new URL('../src/main/workspaceValidation.ts', import.meta.url), 'utf8'))
+const { createNoteBackgroundManager } = await import(moduleUrl((await readFile(new URL('../src/main/noteBackgrounds.ts', import.meta.url), 'utf8')).replace("'./fileOperations'", JSON.stringify(paths)).replace("'./workspaceValidation'", JSON.stringify(validation))))
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dustdesk-backgrounds-'))

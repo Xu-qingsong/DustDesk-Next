@@ -52,7 +52,7 @@ export function useScreenshotCapture(onCaptured?: (dataUrl: string) => void) {
         if (result.message !== 'region-capture-canceled') toast.error(screenshotError(result.message))
         return
       }
-      if (!result.dataUrl) { toast.error('截图没有返回图像，请重试'); return }
+      if (!result.dataUrl) return
       if (mounted.current) onCaptured?.(result.dataUrl)
       toast.success('截图已捕获')
     } catch (error) {

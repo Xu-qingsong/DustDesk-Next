@@ -51,6 +51,7 @@ const api: DustDeskApi = {
   pickPath: (title?: string) => ipcRenderer.invoke('path:pick', title),
   readImageFile: (target: string) => ipcRenderer.invoke('notes:read-image', target),
   openPath: (target: string) => ipcRenderer.invoke('path:open', target),
+  getPathIcon: (target: string) => ipcRenderer.invoke('path:icon', target),
   showPathContextMenu: (target: string) => ipcRenderer.invoke('path:context-menu', target),
   openUrl: (target: string) => ipcRenderer.invoke('url:open', target),
   showMainWindow: () => ipcRenderer.invoke('window:show'),
@@ -58,6 +59,7 @@ const api: DustDeskApi = {
   toggleWidgets: (key?: string) => ipcRenderer.invoke('widgets:toggle', key),
   getWidgetVisibility: (keys: string[]) => ipcRenderer.invoke('widgets:visibility', keys),
   hideWidget: (key: string) => ipcRenderer.invoke('widgets:hide', key),
+  setWidgetVisibility: (key: string, visible: boolean) => ipcRenderer.invoke('widgets:visibility:set', key, visible),
   setWidgetOptions: (key: string, options: { locked?: boolean; topMost?: boolean; transparentBackground?: boolean; autoCollapse?: boolean; collapsed?: boolean; snapToEdges?: boolean; height?: number }) => ipcRenderer.invoke('widgets:options', key, options),
   moveWidget: (key: string, x: number, y: number, commit = false) => ipcRenderer.invoke('widgets:move', key, x, y, commit),
   resizeWidget: (key: string, width: number, height: number, commit = false) => ipcRenderer.invoke('widgets:resize', key, width, height, commit),
@@ -66,6 +68,29 @@ const api: DustDeskApi = {
   applyWidgetPreset: (name: string) => ipcRenderer.invoke('widgets:presets:apply', name),
   deleteWidgetPreset: (name: string) => ipcRenderer.invoke('widgets:presets:delete', name),
   listScreenshotWindows: () => ipcRenderer.invoke('screenshot:windows'),
+  createScreenshotDocument: (png: Uint8Array) => ipcRenderer.invoke('screenshot:document:create', png),
+  selectScreenshotRegion: (rect, action, tool) => ipcRenderer.invoke('screenshot:region-select', rect, action, tool),
+  readScreenshotDocument: (id: string) => ipcRenderer.invoke('screenshot:document:read', id),
+  finishScreenshot: (request: import('../shared/screenshotDocument').ScreenshotFinishRequest) => ipcRenderer.invoke('screenshot:finish', request),
+  discardScreenshotDocument: (id: string) => ipcRenderer.invoke('screenshot:document:discard', id),
+  onScreenshotDocument: (callback: (payload: import('../shared/screenshotDocument').ScreenshotPayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: import('../shared/screenshotDocument').ScreenshotPayload) => callback(payload)
+    ipcRenderer.on('screenshot:document', listener)
+    return () => ipcRenderer.removeListener('screenshot:document', listener)
+  },
+  readPinnedScreenshot: (id: string, version?: number) => ipcRenderer.invoke('screenshot:pin:read', id, version),
+  savePinnedScreenshot: (id, jpeg, version) => ipcRenderer.invoke('screenshot:pin:save', id, jpeg, version),
+  onPinnedScreenshotSaveRequested: callback => {
+    const listener = () => callback()
+    ipcRenderer.on('screenshot:pin:save-request', listener)
+    return () => ipcRenderer.removeListener('screenshot:pin:save-request', listener)
+  },
+  controlPinnedScreenshot: (id: string, action: string, value?: unknown) => ipcRenderer.invoke('screenshot:pin:control', id, action, value),
+  onPinnedScreenshotChanged: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('screenshot:pin:changed', listener)
+    return () => ipcRenderer.removeListener('screenshot:pin:changed', listener)
+  },
   startScreenshot: (mode = 'Region', sourceId?: string) => ipcRenderer.invoke('screenshot:start', mode, sourceId),
   onScreenshotOverlaySource: (callback: (dataUrl: string) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, dataUrl: string) => callback(dataUrl)
@@ -82,7 +107,7 @@ const api: DustDeskApi = {
   saveScreenshot: (dataUrl: string) => ipcRenderer.invoke('screenshot:save', dataUrl),
   pinScreenshot: (dataUrl: string) => ipcRenderer.invoke('screenshot:pin', dataUrl),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
-  writeClipboard: (content: { text?: string; imagePngBase64?: string }) => ipcRenderer.invoke('clipboard:write', content),
+  writeClipboard: (content: { text?: string; imagePngBase64?: string; recordId?: string }) => ipcRenderer.invoke('clipboard:write', content),
   onWorkspaceChanged: (callback: (state: WorkspaceState) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: WorkspaceState) => callback(state)
     ipcRenderer.on('workspace:changed', listener)
@@ -112,15 +137,14 @@ const api: DustDeskApi = {
   createBackup: () => ipcRenderer.invoke('maintenance:backup'),
   listBackups: () => ipcRenderer.invoke('maintenance:list'),
   restoreBackup: (target?: string, fingerprint?: string) => trackedInvoke('maintenance:restore', target, fingerprint),
-  searchFiles: (query: string) => ipcRenderer.invoke('search:files', query) as Promise<SearchFileResult[]>,
+  cancelFileSearch: (requestId: string) => ipcRenderer.invoke('search:cancel', requestId),
+  searchFiles: (query: string, requestId?: string) => ipcRenderer.invoke('search:files', query, requestId) as Promise<SearchFileResult[]>,
   setHotkeys: (keys: { mainWindow?: string; widgets?: string; screenshot?: string; pin?: string; quickCapture?: string }) => ipcRenderer.invoke('hotkeys:set', keys),
   exportProjects: () => ipcRenderer.invoke('projects:export'),
   planSmartOrganize: () => ipcRenderer.invoke('organizer:plan-smart') as Promise<OrganizerPlanItem[]>,
   executeSmartOrganize: plan => trackedInvoke('organizer:execute-smart', plan),
   undoOrganizerMove: () => ipcRenderer.invoke('organizer:undo'),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
-  downloadUpdate: () => ipcRenderer.invoke('update:download'),
-  installUpdate: () => ipcRenderer.invoke('update:install'),
   platform: process.platform
 }
 

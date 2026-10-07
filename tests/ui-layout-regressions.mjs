@@ -32,9 +32,11 @@ try {
     assert.ok(list.scroll > list.height, 'long note list scrolls inside panel')
     await capture(`${name}-notes`)
     await navigate('项目')
-    const title = await page.locator('.phase-controls input').first().boundingBox()
+    await page.locator('.gantt-phase-name').first().click()
+    const title = await page.getByRole('dialog', { name: '编辑阶段' }).getByLabel('阶段名称').boundingBox()
     assert.ok(title.width >= 140, `phase title remains editable: ${title.width}`)
     await contained(page.getByRole('button', { name: '转任务', exact: true }), 'phase action')
+    await page.getByRole('button', { name: '取消', exact: true }).click()
     assert.equal(await page.locator('.content').evaluate(element => element.scrollWidth <= element.clientWidth), true, 'projects have no horizontal page scrolling')
     await capture(`${name}-projects`)
   }

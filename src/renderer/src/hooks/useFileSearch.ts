@@ -10,10 +10,15 @@ export function useFileSearch(query: string, delay = 220) {
   useEffect(() => {
     const currentRequest = ++requestId.current
     if (text.length < 2) return
+    const token = crypto.randomUUID()
     const timer = window.setTimeout(() => {
-      void window.dustdesk.searchFiles(text).then(items => { if (requestId.current === currentRequest) setResult({ query: text, items }) }).catch(() => { if (requestId.current === currentRequest) setResult({ query: text, items: emptyResults }) })
+      void window.dustdesk.searchFiles(text, token).then(items => { if (requestId.current === currentRequest) setResult({ query: text, items }) }).catch(() => { if (requestId.current === currentRequest) setResult({ query: text, items: emptyResults }) })
     }, delay)
-    return () => window.clearTimeout(timer)
+    return () => {
+      ++requestId.current
+      window.clearTimeout(timer)
+      void window.dustdesk.cancelFileSearch(token).catch(() => undefined)
+    }
   }, [text, delay])
   return text.length >= 2 && result.query === text ? result.items : emptyResults
 }

@@ -64,7 +64,7 @@ try {
   await failWrites(false)
   await fixture.window.getByRole('button', { name: '清除背景', exact: true }).click()
   await poll(load, state => !state.Notes[0].BackgroundImagePath, 'background clear retry')
-  await assert.rejects(access(firstImage), { code: 'ENOENT' })
+  await access(firstImage) // workspace.json.bak still references this image for recovery.
   assert.equal((await fixture.window.evaluate(() => window.dustdesk.createBackup())).ok, true)
   console.log('Managed background import, successful backup and failure-safe clear passed')
 
@@ -74,10 +74,12 @@ try {
   const moved = await fixture.window.evaluate(({ id, file }) => window.dustdesk.moveIntoCategory(id, file), { id: source.Id, file })
   assert.equal(moved.ok, true)
   await navigate('桌面收纳')
+  await fixture.window.getByRole('button', { name: '分类管理', exact: true }).click()
   await fixture.window.locator('.category-manager-row select').first().selectOption(source.Id)
   await fixture.window.locator('.category-manager-row select').nth(1).selectOption(target.Id)
-  await fixture.window.getByRole('button', { name: '合并', exact: true }).click()
+  await fixture.window.getByRole('button', { name: '合并分类', exact: true }).click()
   await poll(load, state => !state.DesktopCategories.some(item => item.Id === source.Id), 'category merge')
+  await fixture.window.getByRole('dialog', { name: '分类管理' }).getByRole('button', { name: '完成', exact: true }).click()
   await failWrites(true)
   const failedUndo = await fixture.window.evaluate(() => window.dustdesk.undoOrganizerMove())
   assert.equal(failedUndo.ok, false)

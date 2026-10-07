@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { WorkspaceState } from '../shared/types'
 import { assertPathWithinRoot, isWithinDirectory } from './fileOperations'
+import { isCompleteWorkspace } from './workspaceValidation'
 
 const imageTypes: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp' }
 const maxImageBytes = 12 * 1024 * 1024
@@ -28,6 +29,15 @@ export function createNoteBackgroundManager(deps: Dependencies) {
     if (!target) return
     const notes = [...state.Notes, ...state.RecycleBin.flatMap(item => item.kind === 'note' ? [item.value] : [])]
     if (notes.some(note => note.BackgroundImagePath && samePath(note.BackgroundImagePath, target))) return
+    try {
+      const backup = path.join(deps.directory(), 'workspace.json.bak')
+      await assertPathWithinRoot(deps.directory(), backup, true)
+      const recovery = JSON.parse(await fs.readFile(backup, 'utf8')) as WorkspaceState
+      // If recovery metadata cannot be inspected, retain the image conservatively.
+      if (!isCompleteWorkspace(recovery)) return
+      const recoveryNotes = [...recovery.Notes, ...(recovery.RecycleBin ?? []).flatMap(item => item.kind === 'note' ? [item.value] : [])]
+      if (recoveryNotes.some(note => note.BackgroundImagePath && samePath(note.BackgroundImagePath, target))) return
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return }
     const resolved = path.resolve(target)
     if (!isWithinDirectory(path.resolve(root()), resolved)) return
     try {

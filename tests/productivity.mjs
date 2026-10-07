@@ -89,11 +89,13 @@ try {
   await writeFile(path.join(desktop, 'unmatched.txt'), 'unmatched')
   const category = (await load()).DesktopCategories[1]
   await navigate('桌面收纳')
+  await app.window.getByRole('button', { name: '收纳规则', exact: true }).click()
   await app.window.getByLabel('匹配方式').selectOption('name')
   await app.window.getByLabel('规则内容').fill('invoice')
   await app.window.getByLabel('规则目标分类').selectOption(category.Id)
   await app.window.getByRole('button', { name: '新增规则', exact: true }).click()
   await waitForState(state => state.OrganizerRules.length === 1)
+  await app.window.getByRole('dialog', { name: '收纳规则' }).getByRole('button', { name: '完成', exact: true }).click()
   const plan = await app.window.evaluate(() => window.dustdesk.planSmartOrganize())
   assert.equal(plan.find(item => item.SourcePath.endsWith('invoice.PDF')).CategoryId, category.Id)
   await writeFile(path.join(desktop, 'after-preview.txt'), 'must remain')

@@ -2,13 +2,14 @@ import { focusElapsed, productivityDefaults, productivitySettings } from '../sha
 import { isHttpUrl } from '../shared/urls'
 import { collectDeleted, normalizeProductivity, matchOrganizerRule } from './productivityState'
 import { createProductivityRuntime } from './productivityRuntime'
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, screen, shell, Tray } from 'electron'
 import { createHash } from 'node:crypto'
-import { existsSync, promises as fs, type Dirent } from 'node:fs'
+import { existsSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { autoUpdater } from 'electron-updater'
+import { createReleaseUpdateChecker } from './releaseUpdates'
+import { repository } from '../shared/repository'
 import * as XLSX from 'xlsx'
 import si from 'systeminformation'
 import type { DesktopCategoryRecord, OrganizerPlanItem, SystemMetrics, WidgetPlacement, WorkspaceState } from '../shared/types'
@@ -16,10 +17,34 @@ import { assertPathWithinRoot, isWithinDirectory, moveFileSafely, safeName } fro
 import { createClipboardSampler } from './clipboardSampler'
 import { isCompleteWorkspace } from './workspaceValidation'
 import { createNoteBackgroundManager } from './noteBackgrounds'
+import { createClipboardAssets } from './clipboardAssets'
+import { byteRate, sampleWindowsDiskThroughput } from './diskMetrics'
+import { createFileSearch } from './fileSearch'
+import { snapWidgetBounds } from './widgetSnapping'
+import { createWindowsIconReader } from './windowsIcons'
+import { createIconLoader } from '../shared/iconLoader'
+import { createScreenshotSessions } from './screenshotSessions'
+import { captureWindowsRegion } from './regionCapture'
+import type { ScreenshotRect, ScreenshotTool } from '../shared/screenshotDocument'
+import type { ScreenshotDocument, ScreenshotFinishRequest, ScreenshotPayload } from '../shared/screenshotDocument'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 if (process.env.DUSTDESK_TEST_USER_DATA_DIR) app.setPath('userData', path.resolve(process.env.DUSTDESK_TEST_USER_DATA_DIR))
 let mainWindow: BrowserWindow | null = null
+const releaseUpdates = createReleaseUpdateChecker({
+  version: () => app.getVersion(),
+  request: (input, init) => net.fetch(input, init),
+  confirm: async (version, currentVersion, notes) => {
+    const options: Electron.MessageBoxOptions = {
+      type: 'info', title: '发现新版本', message: `发现 DustDesk ${version}，是否前往更新？`,
+      detail: `当前版本：${currentVersion}\n\n更新内容\n${notes}\n\n确认后打开此版本的 GitHub 发布页面。`,
+      buttons: ['暂不更新', '前往更新'], defaultId: 0, cancelId: 0, noLink: true
+    }
+    const result = await (mainWindow && !mainWindow.isDestroyed() ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options))
+    return result.response === 1
+  },
+  open: url => shell.openExternal(url)
+})
 let captureWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
@@ -33,10 +58,31 @@ const expandedWidgetHeights = new Map<string, number>()
 const widgetResizePreviews = new Set<string>()
 const lockedWidgets = new Set<string>()
 const widgetPlacementSyncing = new Set<string>()
+const widgetSnapModes = new Map<string, boolean>()
+const widgetMovePreviews = new Set<string>()
+const widgetDragVersions = new Map<string, number>()
 const overlayWindows = new Set<BrowserWindow>()
 const workspaceClientSnapshots = new Map<number, WorkspaceState>()
 let activeOverlayResolve: ((dataUrl: string | null) => void) | null = null
 const pinnedWindows = new Set<BrowserWindow>()
+const screenshotOverlayDocuments = new Map<BrowserWindow, string>()
+const screenshotRegionDisplays = new Map<BrowserWindow, Electron.Display>()
+const screenshotRegionRequests = new Map<BrowserWindow, AbortController>()
+const screenshotRegionMetadata = new Map<BrowserWindow, Pick<ScreenshotPayload, 'placement' | 'initialAction' | 'initialTool'>>()
+type PinnedScreenshot = { window: BrowserWindow; png: Uint8Array; version: number; documentId: string; opacity: number; topmost: boolean; locked: boolean; mouseThrough: boolean; originalWidth: number; originalHeight: number }
+const pinnedScreenshots = new Map<string, PinnedScreenshot>()
+const screenshotSessions = createScreenshotSessions({
+  decode: bytes => {
+    if (!bytes.length || bytes.length > 32 * 1024 * 1024) throw Error('图片无效或过大（最大 32 MB）')
+    const image = nativeImage.createFromBuffer(Buffer.from(bytes))
+    if (image.isEmpty()) throw Error('无法读取图片，请使用 PNG 或 JPG 图片')
+    const size = image.getSize()
+    if (size.width * size.height > 40_000_000) throw Error('图片尺寸过大（最大 4000 万像素）')
+    const pngSignature = bytes.length >= 8 && Buffer.from(bytes.subarray(0, 8)).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    return { png: pngSignature ? new Uint8Array(bytes) : new Uint8Array(image.toPNG()), ...size }
+  },
+  output: completeScreenshotOutput
+})
 let clipboardMonitoringEnabled = true
 let reminderTimer: NodeJS.Timeout | null = null
 type OrganizerUndoAction = { source: string; target: string; categoryId: string; sourceCategoryId?: string; sourceCategory?: DesktopCategoryRecord }
@@ -44,15 +90,49 @@ const organizerUndoStack: OrganizerUndoAction[] = []
 let workspaceWriteQueue: Promise<string> = Promise.resolve('')
 let workspaceMutationQueue: Promise<void> = Promise.resolve()
 let defaultStateInitialization: Promise<WorkspaceState> | null = null
+let workspaceSeen = false
 let workspaceMigration: Promise<WorkspaceState> | null = null
 const launchedHidden = process.argv.includes('--hidden')
 const supportedWidgetKeys = new Set(['todo', 'notes', 'projects', 'launcher', 'links', 'clipboard', 'organizer', 'search', 'monitor', 'countdown'])
 const maxImageBytes = 12 * 1024 * 1024
+const clipboardAssets = createClipboardAssets(dataDirectory)
+const searchFiles = createFileSearch()
+const readWindowsIcon = createWindowsIconReader()
+const pathIcons = createIconLoader(async target => {
+  let isDirectory: boolean | undefined
+  try {
+    const info = await fs.stat(target)
+    isDirectory = info.isDirectory()
+    if (process.platform === 'win32') {
+      const resourceFile = /\.(lnk|exe|dll|ico|icl)$/i.test(target)
+      const dataUrl = await readWindowsIcon({ path: target, index: 0, directory: isDirectory, shortcut: !isDirectory && /\.lnk$/i.test(target), shellItem: !resourceFile }, `${info.size}:${info.mtimeMs}`)
+      if (dataUrl) return { isDirectory, dataUrl }
+      // Chromium can associate folders and extensionless files with the volume.
+      // Its .url association also discards the shortcut's individual icon.
+      if (isDirectory || !path.extname(target) || /\.url$/i.test(target)) return { isDirectory }
+    }
+    // File associations cover documents and unsupported resources on Windows.
+    // A slow shell extension cannot hold the icon queue indefinitely.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const icon = await Promise.race([
+        app.getFileIcon(target, { size: 'large' }),
+        new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), 1500) })
+      ])
+      if (icon && !icon.isEmpty()) return { isDirectory, dataUrl: icon.toDataURL() }
+    } finally { clearTimeout(timer) }
+  } catch { /* Missing files or damaged resources keep their visible type fallback. */ }
+  return isDirectory === undefined ? {} : { isDirectory }
+})
+const fileSearches = new Map<number, { requestId: string; controller: AbortController }>()
+const fileSearchOwners = new WeakSet<Electron.WebContents>()
 const singleInstanceLock = app.requestSingleInstanceLock()
 if (!singleInstanceLock) app.quit()
 else app.on('second-instance', () => showWindow())
 
 function broadcastWorkspaceChanged(state: WorkspaceState) {
+  reconcileWidgetVisibility(state)
+  for (const key of widgetWindows.keys()) widgetSnapModes.set(key, widgetSnappingEnabled(key, state))
   for (const target of BrowserWindow.getAllWindows()) {
     if (!target.isDestroyed()) {
       target.webContents.send('workspace:changed', state)
@@ -136,7 +216,7 @@ function normalizeState(value: unknown): WorkspaceState | null {
     if ((typeof expected === 'number' && typeof candidate === 'number' && Number.isFinite(candidate)) || (typeof expected === 'string' && typeof candidate === 'string') || (typeof expected === 'boolean' && typeof candidate === 'boolean')) normalizedSettings[key] = candidate as never
   }
   const normalized = { ...base, ...value, Settings: normalizedSettings } as WorkspaceState
-  normalized.SchemaVersion = typeof value.SchemaVersion === 'number' && Number.isFinite(value.SchemaVersion) ? Math.max(1, Math.round(value.SchemaVersion)) : base.SchemaVersion
+  normalized.SchemaVersion = 3
   normalized.LegacyImportCompleted = value.LegacyImportCompleted === true
   normalized.QuickNote = typeof value.QuickNote === 'string' ? value.QuickNote : ''
   const records = (key: string) => Array.isArray(value[key]) ? value[key].filter(isRecord) : []
@@ -146,7 +226,7 @@ function normalizeState(value: unknown): WorkspaceState | null {
   normalized.Projects = records('Projects').map(item => ({ Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Name: typeof item.Name === 'string' ? item.Name : '', ProjectPath: typeof item.ProjectPath === 'string' ? item.ProjectPath : '', Phases: Array.isArray(item.Phases) ? item.Phases.filter(isRecord).map(phase => ({ Id: typeof phase.Id === 'string' ? phase.Id : crypto.randomUUID(), Title: typeof phase.Title === 'string' ? phase.Title : '', Status: ['Todo', 'Doing', 'Done'].includes(String(phase.Status)) ? phase.Status as 'Todo' | 'Doing' | 'Done' : 'Todo', StartDate: typeof phase.StartDate === 'string' ? phase.StartDate : null, EndDate: typeof phase.EndDate === 'string' ? phase.EndDate : null, ProgressPercent: typeof phase.ProgressPercent === 'number' && Number.isFinite(phase.ProgressPercent) ? phase.ProgressPercent : 0, ProjectPath: typeof phase.ProjectPath === 'string' ? phase.ProjectPath : '', Subtasks: Array.isArray(phase.Subtasks) ? phase.Subtasks.filter(isRecord).map(subtask => ({ Id: typeof subtask.Id === 'string' ? subtask.Id : crypto.randomUUID(), Title: typeof subtask.Title === 'string' ? subtask.Title : '', IsCompleted: subtask.IsCompleted === true, FilePath: typeof subtask.FilePath === 'string' ? subtask.FilePath : '' })) : [] })) : [] }))
   normalized.Launchers = records('Launchers').map(item => ({ Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Name: typeof item.Name === 'string' ? item.Name : '', Path: typeof item.Path === 'string' ? item.Path : '', ...(typeof item.GroupId === 'string' ? { GroupId: item.GroupId } : {}) }))
   normalized.LinkGroups = records('LinkGroups').map(group => ({ Id: typeof group.Id === 'string' ? group.Id : crypto.randomUUID(), Name: typeof group.Name === 'string' ? group.Name : '未命名', Links: Array.isArray(group.Links) ? group.Links.filter(isRecord).map(item => ({ Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Name: typeof item.Name === 'string' ? item.Name : '', Url: typeof item.Url === 'string' ? item.Url : '', Note: typeof item.Note === 'string' ? item.Note : '', CreatedAt: typeof item.CreatedAt === 'string' ? item.CreatedAt : new Date().toISOString(), UpdatedAt: typeof item.UpdatedAt === 'string' ? item.UpdatedAt : new Date().toISOString() })) : [] }))
-  normalized.ClipboardHistory = records('ClipboardHistory').map(item => ({ Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Kind: item.Kind === 'Image' ? 'Image' : 'Text', Text: typeof item.Text === 'string' ? item.Text : '', ImagePngBase64: typeof item.ImagePngBase64 === 'string' ? item.ImagePngBase64 : '', ImageFileName: typeof item.ImageFileName === 'string' ? item.ImageFileName : '', ImageSha256: typeof item.ImageSha256 === 'string' ? item.ImageSha256 : '', CreatedAt: typeof item.CreatedAt === 'string' ? item.CreatedAt : new Date().toISOString(), IsLocked: item.IsLocked === true, IsPinned: item.IsPinned === true }))
+  normalized.ClipboardHistory = records('ClipboardHistory').map(item => ({ Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Kind: item.Kind === 'Image' ? 'Image' : 'Text', Text: typeof item.Text === 'string' ? item.Text : '', ImagePngBase64: typeof item.ImagePngBase64 === 'string' ? item.ImagePngBase64 : '', ...(typeof item.ImageAssetName === 'string' ? { ImageAssetName: item.ImageAssetName } : {}), ImageFileName: typeof item.ImageFileName === 'string' ? item.ImageFileName : '', ImageSha256: typeof item.ImageSha256 === 'string' ? item.ImageSha256 : '', CreatedAt: typeof item.CreatedAt === 'string' ? item.CreatedAt : new Date().toISOString(), IsLocked: item.IsLocked === true, IsPinned: item.IsPinned === true }))
   normalized.DesktopCategories = records('DesktopCategories').map(item => ({ Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Name: typeof item.Name === 'string' ? item.Name : '未命名', IsCollapsed: item.IsCollapsed === true, ItemPaths: Array.isArray(item.ItemPaths) ? item.ItemPaths.filter((path): path is string => typeof path === 'string') : [] }))
   if (!normalized.LinkGroups.length) normalized.LinkGroups = base.LinkGroups
   if (!isRecord(settings.WidgetPlacements)) normalized.Settings.WidgetPlacements = {}
@@ -177,7 +257,7 @@ function defaultState(): WorkspaceState {
   const now = new Date().toISOString()
   return {
     ...productivityDefaults(),
-    SchemaVersion: 2, LegacyImportCompleted: false, QuickNote: '',
+    SchemaVersion: 3, LegacyImportCompleted: false, QuickNote: '',
     Settings: {
       ...productivitySettings,
       MainWindowDisplayName: 'DustDesk', StartHiddenToTray: false, StartWithWindows: false,
@@ -210,11 +290,15 @@ async function readState(): Promise<WorkspaceState> {
       const contents = await fs.readFile(candidate, 'utf8')
       foundExisting = true
       const raw = JSON.parse(contents)
-      if (isRecord(raw) && typeof raw.SchemaVersion === 'number' && raw.SchemaVersion > 2) throw new Error('工作区版本较新，请使用新版应用打开')
+      if (isRecord(raw) && typeof raw.SchemaVersion === 'number' && raw.SchemaVersion > 3) throw new Error('工作区版本较新，请使用新版应用打开')
       if (!isCompleteWorkspace(raw)) continue
       const parsed = normalizeState(raw)
       if (parsed) {
-        if (equalValue(raw, parsed)) {
+        workspaceSeen = true
+        const needsImageMigration = parsed.ClipboardHistory.some(item => item.Kind === 'Image' && item.ImagePngBase64)
+        // Asset migration belongs to the queued write. A storage failure must reject
+        // this read, rather than treat valid data as corrupt and load an older .bak.
+        if (!needsImageMigration && equalValue(raw, parsed)) {
           if (index === 0) return parsed
           if (!workspaceMigration) {
             const migration = writeState(parsed, false).then(() => parsed)
@@ -232,16 +316,26 @@ async function readState(): Promise<WorkspaceState> {
       }
     } catch (error) {
       if (error instanceof Error && error.message === '工作区版本较新，请使用新版应用打开') throw error
+      // A sharing/permission/I/O failure says nothing about file integrity.
+      // Only malformed JSON or a missing file may fall back to the recovery copy.
+      if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') foundExisting = true
     }
   }
   if (foundExisting) throw new Error('工作区与备份均无法完整读取，已保留原文件，请从备份恢复')
+  if (defaultStateInitialization) return defaultStateInitialization
+  if (workspaceSeen) {
+    // Another initial read may have crossed the atomic rename while awaiting I/O.
+    if (existsSync(dataPath())) return readState()
+    throw new Error('工作区文件已丢失，未创建空白数据，请从备份恢复')
+  }
   if (!defaultStateInitialization) {
     defaultStateInitialization = (async () => {
       const state = defaultState()
       await writeState(state)
       return state
-    })().catch(error => { defaultStateInitialization = null; throw error })
+    })()
+    void defaultStateInitialization.then(() => { defaultStateInitialization = null }, () => { defaultStateInitialization = null })
   }
   return defaultStateInitialization
 }
@@ -249,17 +343,28 @@ async function readState(): Promise<WorkspaceState> {
 async function writeState(state: WorkspaceState, backupCurrent = true) {
   const operation = async () => {
     const normalized = normalizeState(state)
-    if (!normalized) throw new Error('工作区数据结构无效')
+    if (!normalized || !isCompleteWorkspace(normalized)) throw new Error('工作区数据结构无效')
+    await clipboardAssets.externalize(normalized)
     ;(normalized as WorkspaceState & { OrganizerUndoStack?: OrganizerUndoAction[] }).OrganizerUndoStack = organizerUndoStack.slice(-100)
     const directory = dataDirectory()
     await fs.mkdir(directory, { recursive: true })
     const temporary = `${dataPath()}.electron-tmp-${process.pid}-${crypto.randomUUID()}`
-    await fs.writeFile(temporary, JSON.stringify(normalized, null, 2), 'utf8')
-    JSON.parse(await fs.readFile(temporary, 'utf8'))
-    if (existsSync(dataPath())) {
-      if (backupCurrent) await fs.copyFile(dataPath(), backupPath())
+    const temporaryBackup = `${temporary}.bak`
+    try {
+      await fs.writeFile(temporary, JSON.stringify(normalized, null, 2), { encoding: 'utf8', flag: 'wx' })
+      JSON.parse(await fs.readFile(temporary, 'utf8'))
+      if (existsSync(dataPath()) && backupCurrent) {
+        await fs.copyFile(dataPath(), temporaryBackup)
+        await fs.rename(temporaryBackup, backupPath())
+      }
       await fs.rename(temporary, dataPath())
-    } else await fs.rename(temporary, dataPath())
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+      await fs.rm(temporaryBackup, { force: true }).catch(() => undefined)
+    }
+    state.ClipboardHistory = normalized.ClipboardHistory
+    state.SchemaVersion = normalized.SchemaVersion
+    workspaceSeen = true
     return dataPath()
   }
   const next = workspaceWriteQueue.then(operation, operation)
@@ -289,6 +394,36 @@ function validWidgetKey(value: unknown): value is string {
 }
 function widgetLimits(key: string) {
   return { minWidth: key === 'search' ? 52 : 300, minHeight: key === 'search' ? 52 : 120, maxWidth: 1200, maxHeight: 900 }
+}
+function widgetContentExists(key: string, state: WorkspaceState) {
+  if (key.startsWith('note:')) return state.Notes.some(note => key === `note:${note.Id}`)
+  if (key.startsWith('project:')) return state.Projects.some(project => key === `project:${project.Id}`)
+  if (key.startsWith('organizer-group:')) return key.slice(16).split(',').some(id => state.DesktopCategories.some(category => category.Id === id))
+  return supportedWidgetKeys.has(key)
+}
+function reconcileWidgetVisibility(state: WorkspaceState) {
+  for (const [key, window] of widgetWindows) {
+    if (window.isDestroyed()) continue
+    const visible = state.Settings.WidgetPlacements?.[key]?.Visible === true && widgetContentExists(key, state)
+    if (visible !== window.isVisible()) {
+      visible ? window.show() : window.hide()
+      broadcastWidgetVisibility(key, visible)
+    }
+  }
+  for (const [key, placement] of Object.entries(state.Settings.WidgetPlacements ?? {})) {
+    if (!validWidgetKey(key) || placement.Visible !== true || !widgetContentExists(key, state) || widgetWindows.has(key)) continue
+    createWidgetWindow(key, state).show()
+    broadcastWidgetVisibility(key, true)
+  }
+  widgetsVisible = [...widgetWindows.values()].some(window => !window.isDestroyed() && window.isVisible())
+}
+function widgetSnappingEnabled(key: string, state: WorkspaceState) {
+  return state.Settings.WidgetPlacements?.[key]?.SnapToEdges ?? (key === 'launcher' && state.Settings.LauncherWidgetSnapToEdges === true)
+}
+function widgetSnappedBounds(key: string, bounds: { x: number; y: number; width: number; height: number }, enabled = widgetSnapModes.get(key) === true) {
+  if (!enabled) return { ...bounds, dockEdge: 'None' as const }
+  const display = screen.getDisplayNearestPoint({ x: bounds.x + Math.round(bounds.width / 2), y: bounds.y + Math.round(bounds.height / 2) })
+  return snapWidgetBounds(bounds, display.workArea, true)
 }
 function suppressWidgetPlacementSave(key: string) {
   widgetPlacementSyncing.add(key)
@@ -337,21 +472,6 @@ async function isRealPathWithinDirectory(root: string, target: string) {
 function uniqueFilePath(directory: string, prefix: string, extension: string) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   return path.join(directory, `${prefix}-${stamp}-${crypto.randomUUID()}.${extension}`)
-}
-
-async function searchDirectory(root: string, needle: string, results: { Name: string; Path: string; IsDirectory: boolean }[]) {
-  const pending = [path.resolve(root)]; let visited = 0
-  while (pending.length && results.length < 40 && visited < 50_000) {
-    const directory = pending.shift()!
-    let entries: Dirent[]
-    try { entries = await fs.readdir(directory, { withFileTypes: true }) } catch { continue }
-    for (const entry of entries) {
-      if (++visited > 50_000 || results.length >= 40) break
-      const entryPath = path.join(directory, entry.name)
-      if (entry.name.toLowerCase().includes(needle)) results.push({ Name: entry.name, Path: entryPath, IsDirectory: entry.isDirectory() })
-      if (entry.isDirectory()) pending.push(entryPath)
-    }
-  }
 }
 
 async function moveWithVerification(source: string, target: string) {
@@ -440,10 +560,8 @@ async function checkTodoReminders() {
 }
 
 async function captureRegionScreenshot() {
-  const { desktopCapturer } = await import('electron')
   const displays = screen.getAllDisplays()
-  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 3840, height: 2160 } })
-  if (!displays.length || !sources.length) throw new Error('没有找到可截图的屏幕，请重试')
+  if (!displays.length) throw new Error('没有找到可截图的屏幕，请重试')
   return new Promise<string | null>((resolve, reject) => {
     activeOverlayResolve = resolve
     const abort = (error: unknown) => {
@@ -455,24 +573,39 @@ async function captureRegionScreenshot() {
     }
     try {
       for (const display of displays) {
-        const source = sources.find(item => String(item.display_id) === String(display.id)) ?? sources[displays.indexOf(display)]
-        if (!source || source.thumbnail.isEmpty()) throw new Error('无法读取屏幕图像，请重试')
-        const window = new BrowserWindow({ x: display.bounds.x, y: display.bounds.y, width: display.bounds.width, height: display.bounds.height, frame: false, transparent: false, fullscreenable: false, resizable: false, movable: false, skipTaskbar: true, alwaysOnTop: true, show: false, webPreferences: { preload: path.join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } })
+        const window = new BrowserWindow({ x: display.bounds.x, y: display.bounds.y, width: display.bounds.width, height: display.bounds.height, frame: false, transparent: true, backgroundColor: '#00000000', fullscreenable: false, resizable: false, movable: false, skipTaskbar: true, alwaysOnTop: true, show: false, webPreferences: { preload: path.join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } })
+        // Windows excludes this overlay from screen capture while its selection
+        // and tools stay visible and keep pointer capture throughout the stroke.
+        window.setContentProtection(true)
         overlayWindows.add(window)
+        screenshotRegionDisplays.set(window, display)
         window.on('closed', () => {
           overlayWindows.delete(window)
+          screenshotRegionDisplays.delete(window); screenshotRegionMetadata.delete(window)
+          screenshotRegionRequests.get(window)?.abort(); screenshotRegionRequests.delete(window)
+          const documentId = screenshotOverlayDocuments.get(window); screenshotOverlayDocuments.delete(window)
+          if (documentId) screenshotSessions.remove(documentId)
           if (!overlayWindows.size && activeOverlayResolve === resolve) { activeOverlayResolve = null; resolve(null) }
         })
         window.webContents.once('did-finish-load', () => {
-          if (!window.isDestroyed() && activeOverlayResolve === resolve) { window.webContents.send('screenshot:overlay-source', source.thumbnail.toDataURL()); window.show(); window.focus() }
+          if (!window.isDestroyed() && activeOverlayResolve === resolve) { window.show(); if (screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id === display.id) window.focus() }
         })
         window.webContents.once('render-process-gone', () => abort(new Error('截图选区窗口意外退出，请重试')))
+        const physical = screen.dipToScreenRect(window, display.bounds)
+        const query = { overlay: '1', region: '1', regionWidth: String(physical.width), regionHeight: String(physical.height), regionDipWidth: String(display.bounds.width), regionDipHeight: String(display.bounds.height) }
         const rendererUrl = process.env.ELECTRON_RENDERER_URL
-        const loading = rendererUrl ? window.loadURL(`${rendererUrl}?overlay=1`) : window.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { overlay: '1' } })
+        const loading = rendererUrl ? window.loadURL(`${rendererUrl}?${new URLSearchParams(query)}`) : window.loadFile(path.join(__dirname, '../renderer/index.html'), { query })
         void loading.catch(abort)
       }
     } catch (error) { abort(error) }
   })
+}
+
+function screenCaptureBytes(image: Electron.NativeImage, display: Electron.Display) {
+  const width = Math.round(display.size.width * display.scaleFactor), height = Math.round(display.size.height * display.scaleFactor)
+  const size = image.getSize()
+  // Normalize each display independently before mapping DIP to native pixels.
+  return new Uint8Array((size.width === width && size.height === height ? image : image.resize({ width, height, quality: 'best' })).toPNG())
 }
 
 function showWindow() {
@@ -514,6 +647,7 @@ function createWindow() {
 }
 
 function applyWidgetPlacement(key: string, window: BrowserWindow, state: WorkspaceState) {
+  widgetSnapModes.set(key, widgetSnappingEnabled(key, state))
   const placement = state.Settings.WidgetPlacements?.[key]
   const { minWidth, minHeight } = widgetLimits(key)
   const bounds = restoredWidgetBounds(key, placement, window.getBounds())
@@ -541,32 +675,40 @@ function createWidgetWindow(key = 'todo', initialState?: WorkspaceState) {
   let restoring = true
   let moveSaveTimer: NodeJS.Timeout | null = null
   const savePlacement = async () => {
-    if (widgetWindow.isDestroyed() || widgetPlacementSyncing.has(key)) return
-    const { x, y, width, height } = widgetWindow.getBounds()
+    if (widgetWindow.isDestroyed() || widgetPlacementSyncing.has(key) || widgetMovePreviews.has(key)) return
+    const { x, y, width, height, dockEdge } = widgetSnappedBounds(key, widgetWindow.getBounds())
+    const previousBounds = widgetWindow.getBounds()
+    if (previousBounds.x !== x || previousBounds.y !== y) {
+      snapping = true
+      try { widgetWindow.setPosition(x, y) } finally { snapping = false }
+    }
     const { state } = await updateState(state => {
       const previous = state.Settings.WidgetPlacements?.[key] ?? {}
-      state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...previous, X: x, Y: y, Width: width, Height: previous.IsCollapsed ? previous.Height ?? expandedWidgetHeights.get(key) ?? 220 : height, Visible: previous.Visible !== false } }
+      state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...previous, X: x, Y: y, Width: width, Height: previous.IsCollapsed ? previous.Height ?? expandedWidgetHeights.get(key) ?? 220 : height, Visible: previous.Visible !== false, DockEdge: dockEdge } }
     })
     broadcastWorkspaceChanged(state)
   }
-  const snapToEdges = () => {
-    if (snapping || widgetWindow.isDestroyed() || widgetPlacementSyncing.has(key)) return
-   void readState().then(state => {
-      if (widgetWindow.isDestroyed() || widgetPlacementSyncing.has(key)) return
-      const placement = state.Settings.WidgetPlacements?.[key]
-      if (!placement?.SnapToEdges && !(key === 'launcher' && state.Settings.LauncherWidgetSnapToEdges)) return
-      const { x, y, width, height } = widgetWindow.getBounds()
-      const display = screen.getDisplayNearestPoint({ x: x + Math.round(width / 2), y: y + Math.round(height / 2) })
-      const area = display.workArea; const distance = 18
-      const left = Math.abs(x - area.x) <= distance; const right = Math.abs(area.x + area.width - (x + width)) <= distance; const top = Math.abs(y - area.y) <= distance; const bottom = Math.abs(area.y + area.height - (y + height)) <= distance
-      const nextX = left ? area.x : right ? area.x + area.width - width : x
-      const nextY = top ? area.y : bottom ? area.y + area.height - height : y
-      if (nextX === x && nextY === y) return
-      snapping = true; widgetWindow.setPosition(nextX, nextY); snapping = false
-      if (key === 'search') void updateState(state => { const current = state.Settings.WidgetPlacements?.[key] ?? {}; state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...current, DockEdge: left ? 'Left' : right ? 'Right' : top ? 'Top' : bottom ? 'Bottom' : 'None' } } }).then(({ state }) => broadcastWorkspaceChanged(state))
-    })
+  const onMove = () => {
+    if (restoring || snapping || widgetPlacementSyncing.has(key) || widgetMovePreviews.has(key)) return
+    if (moveSaveTimer) clearTimeout(moveSaveTimer)
+    moveSaveTimer = setTimeout(() => { moveSaveTimer = null; void savePlacement() }, 150)
   }
-  widgetWindow.on('moved', () => { if (restoring || widgetPlacementSyncing.has(key)) return; if (moveSaveTimer) clearTimeout(moveSaveTimer); moveSaveTimer = setTimeout(() => { moveSaveTimer = null; snapToEdges(); void savePlacement() }, 150) }); widgetWindow.on('resized', () => { if (!restoring && !widgetResizePreviews.has(key) && !widgetPlacementSyncing.has(key)) void savePlacement() }); widgetWindow.on('closed', () => { restoring = false; widgetResizePreviews.delete(key); widgetPlacementSyncing.delete(key); if (moveSaveTimer) clearTimeout(moveSaveTimer); widgetWindows.delete(key); widgetsVisible = [...widgetWindows.values()].some(item => !item.isDestroyed() && item.isVisible()) })
+  widgetWindow.on('move', onMove)
+  widgetWindow.on('moved', onMove)
+  widgetWindow.on('resized', () => { if (!restoring && !widgetResizePreviews.has(key) && !widgetPlacementSyncing.has(key)) void savePlacement() })
+  widgetWindow.on('closed', () => {
+    restoring = false; widgetResizePreviews.delete(key); widgetPlacementSyncing.delete(key); widgetMovePreviews.delete(key); widgetSnapModes.delete(key); widgetDragVersions.delete(key)
+    if (moveSaveTimer) clearTimeout(moveSaveTimer)
+    widgetWindows.delete(key)
+    widgetsVisible = [...widgetWindows.values()].some(item => !item.isDestroyed() && item.isVisible())
+    if (isQuitting) return
+    broadcastWidgetVisibility(key, false)
+    void updateState(state => {
+      if (widgetWindows.has(key)) return
+      const current = state.Settings.WidgetPlacements?.[key]
+      if (current) state.Settings.WidgetPlacements = { ...state.Settings.WidgetPlacements, [key]: { ...current, Visible: false } }
+    }).then(({ state }) => broadcastWorkspaceChanged(state)).catch(error => console.error('Unable to save closed widget:', error))
+  })
   const restore = (state: WorkspaceState) => {
     if (widgetWindow.isDestroyed()) return
     applyWidgetPlacement(key, widgetWindow, state)
@@ -583,18 +725,23 @@ function createWidgetWindow(key = 'todo', initialState?: WorkspaceState) {
   return widgetWindow
 }
 
-async function toggleWidgetWindow(key = 'todo') {
-  const window = createWidgetWindow(key)
-  if (window.isVisible()) window.hide()
-  else window.show()
-  const visible = window.isVisible()
-  widgetsVisible = [...widgetWindows.values()].some(item => !item.isDestroyed() && item.isVisible())
-  mainWindow?.webContents.send('widgets:toggle', widgetsVisible)
-  broadcastWidgetVisibility(key, visible)
-  const { state } = await updateState(state => { const current = state.Settings.WidgetPlacements?.[key] ?? {}; state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...current, Visible: visible } } })
-  broadcastWorkspaceChanged(state)
-  return { visible }
+async function setWidgetVisibility(key: string, desired?: boolean) {
+  return enqueueWorkspaceOperation(async () => {
+    const state = await readState()
+    if (!validWidgetKey(key) || (desired !== false && !widgetContentExists(key, state))) throw new Error('小组件对应的项目、便签或分类已不存在')
+    const window = widgetWindows.get(key)
+    const visible = desired ?? !(window && !window.isDestroyed() && window.isVisible())
+    const current = state.Settings.WidgetPlacements?.[key] ?? {}
+    state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...current, Visible: visible } }
+    // Save before changing native windows, so write failures cannot leave a false pin state.
+    await writeState(state)
+    broadcastWorkspaceChanged(state)
+    mainWindow?.webContents.send('widgets:toggle', widgetsVisible)
+    broadcastWidgetVisibility(key, visible)
+    return { visible }
+  })
 }
+const toggleWidgetWindow = (key = 'todo') => setWidgetVisibility(key)
 
 async function toggleConfiguredWidgets() {
   const state = await readState()
@@ -603,9 +750,8 @@ async function toggleConfiguredWidgets() {
   const visibility = targets.map(key => { const window = widgetWindows.get(key); return Boolean(window && !window.isDestroyed() && window.isVisible()) })
   const shouldShow = !visibility.some(Boolean)
   for (const key of targets) {
-    const window = createWidgetWindow(key)
-    if (shouldShow && !window.isVisible()) await toggleWidgetWindow(key)
-    if (!shouldShow && window.isVisible()) await toggleWidgetWindow(key)
+    if (shouldShow && !widgetContentExists(key, state)) continue
+    await setWidgetVisibility(key, shouldShow)
   }
 }
 
@@ -616,7 +762,7 @@ function restoreVisibleWidgets(state: WorkspaceState) {
     if (state.Settings.WidgetPlacements?.[key]?.Visible !== true) window.hide()
   }
   for (const [key, placement] of Object.entries(state.Settings.WidgetPlacements ?? {})) {
-    if (!validWidgetKey(key) || placement?.Visible !== true) continue
+    if (!validWidgetKey(key) || placement?.Visible !== true || !widgetContentExists(key, state)) continue
     const window = createWidgetWindow(key, state)
     if (!window.isVisible()) window.show()
   }
@@ -631,7 +777,7 @@ function registerHotkeys(settings: WorkspaceState['Settings']) {
     [settings.QuickCaptureHotKey, showQuickCapture],
     [settings.DesktopWidgetsHotKey, toggleConfiguredWidgets],
     [settings.ScreenshotHotKey, () => { void captureScreenshot('Region') }],
-    [settings.PinScreenshotHotKey, () => { if (lastScreenshotDataUrl) void pinScreenshotData(lastScreenshotDataUrl) }]
+    [settings.PinScreenshotHotKey, () => { void pinClipboardScreenshot().catch(error => tray?.displayBalloon?.({ title: '贴图失败', content: String(error) })) }]
   ]
   let registered = true
   for (const [accelerator, handler] of entries) { if (typeof accelerator === 'string' && accelerator.trim()) { try { registered = globalShortcut.register(accelerator, handler) && registered } catch { registered = false } } }
@@ -646,8 +792,10 @@ function createTray() {
      { label: '显示 DustDesk', click: showWindow },
      { label: '快速记录', click: showQuickCapture },
      { label: '显示/隐藏桌面小组件', click: toggleConfiguredWidgets },
+     { label: '显示/隐藏所有贴图', click: () => { const hide = [...pinnedWindows].some(window => !window.isDestroyed() && window.isVisible()); for (const window of pinnedWindows) if (!window.isDestroyed()) hide ? window.hide() : window.showInactive() } },
+     { label: '恢复所有贴图的鼠标操作', click: () => { for (const pin of pinnedScreenshots.values()) { pin.mouseThrough = false; pin.locked = false; pin.window.setIgnoreMouseEvents(false); pin.window.show(); pin.window.webContents.send('screenshot:pin:changed') } } },
      { label: '关闭所有桌面贴图', click: closePinnedWindows },
-    { label: '检查更新', click: async () => { try { const result = await autoUpdater.checkForUpdates(); tray?.displayBalloon?.({ title: 'DustDesk', content: result?.updateInfo.version ? `发现新版本 ${result.updateInfo.version}` : '当前已是最新版本' }) } catch (error) { tray?.displayBalloon?.({ title: 'DustDesk', content: `检查更新失败：${String(error)}` }) } } },
+    { label: '检查更新', click: async () => { const result = await releaseUpdates.check(); if (!result.available) await dialog.showMessageBox({ type: result.ok ? 'info' : 'error', title: '检查更新', message: result.ok ? result.message || '当前已是最新版本' : result.error || '检查更新失败' }) } },
     { type: 'separator' },
     { label: '退出 DustDesk', click: () => { isQuitting = true; app.quit() } }
   ]))
@@ -700,8 +848,9 @@ function createApplicationMenu() {
     {
       label: '帮助',
       submenu: [
-        { label: '关于 DustDesk', click: () => { void dialog.showMessageBox({ type: 'info', title: '关于 DustDesk', message: 'DustDesk', detail: '本地桌面工作台\n版本 1.0.0 · Electron' }) } },
-        { label: '项目主页', click: () => { void shell.openExternal('https://github.com/Abyxs/DustDesk-Desktop-Manager') } }
+        { label: '关于 DustDesk', click: () => { void dialog.showMessageBox({ type: 'info', title: '关于 DustDesk', message: 'DustDesk', detail: `本地桌面工作台\n版本 ${app.getVersion()} · Electron\n${repository.url}` }) } },
+        { label: '项目主页', click: () => { void shell.openExternal(repository.url) } },
+        { label: '问题反馈', click: () => { void shell.openExternal(repository.issues) } }
       ]
     }
   ]
@@ -728,7 +877,7 @@ function startClipboardMonitor() {
 }
 
 async function captureScreenshot(mode: 'Region' | 'Window' | 'FullScreen', sourceId?: string) {
-  if (screenshotCaptureInFlight) return { ok: false, message: 'screenshot-in-progress' }
+  if (screenshotCaptureInFlight || overlayWindows.size) return { ok: false, message: 'screenshot-in-progress' }
   screenshotCaptureInFlight = true
   try {
     if (!['Region', 'Window', 'FullScreen'].includes(mode)) throw new Error('截图模式无效')
@@ -744,44 +893,176 @@ async function captureScreenshot(mode: 'Region' | 'Window' | 'FullScreen', sourc
 async function captureScreenshotInternal(mode: 'Region' | 'Window' | 'FullScreen', sourceId?: string) {
   const settings = (await readState()).Settings
   if (settings.ScreenshotDelaySeconds > 0) await new Promise(resolve => setTimeout(resolve, Math.min(10, settings.ScreenshotDelaySeconds) * 1000))
-  const directory = path.resolve(settings.ScreenshotSaveDirectory?.trim() || path.join(dataDirectory(), 'Screenshots'))
-  await fs.mkdir(directory, { recursive: true })
-  const extension = settings.ScreenshotFormat === 'jpg' || settings.ScreenshotFormat === 'jpeg' ? 'jpg' : 'png'
-  const persist = async (dataUrl: string, fallbackBuffer?: Buffer) => {
-    const image = decodeScreenshotImage(dataUrl)
-    const buffer = extension === 'jpg' ? image.toJPEG(92) : fallbackBuffer ?? image.toPNG()
-    const normalizedDataUrl = extension === 'jpg' ? image.toDataURL() : dataUrl
-    const output = uniqueFilePath(directory, 'DustDesk', extension)
-    await fs.writeFile(output, buffer)
-    lastScreenshotDataUrl = normalizedDataUrl
-    if (settings.ScreenshotAutoCopy) clipboard.writeImage(image)
-    if (settings.ScreenshotAfterAction === 'copy' && !settings.ScreenshotAutoCopy) clipboard.writeImage(image)
-    if (settings.ScreenshotAfterAction === 'pin') await pinScreenshotData(normalizedDataUrl)
-    if (settings.ScreenshotAfterAction === 'edit' && mainWindow && !mainWindow.isDestroyed()) {
-      showWindow()
-      mainWindow.webContents.send('screenshot:captured', normalizedDataUrl)
-    }
-    if (settings.ScreenshotAutoAddToClipboardHistory && mainWindow && !mainWindow.isDestroyed()) {
-      const imagePngBase64 = image.toPNG().toString('base64'); const fingerprint = createHash('sha256').update(imagePngBase64).digest('hex')
-      mainWindow.webContents.send('clipboard:changed', { Id: crypto.randomUUID(), Kind: 'Image', Text: '', ImagePngBase64: imagePngBase64, ImageFileName: path.basename(output), ImageSha256: fingerprint, CreatedAt: new Date().toISOString(), IsLocked: false, IsPinned: false })
-    }
-    return { output, dataUrl: normalizedDataUrl }
-  }
   if (mode === 'Region') {
-    const dataUrl = await captureRegionScreenshot()
-    if (!dataUrl) return { ok: false, message: 'region-capture-canceled' }
-    const match = /^data:image\/png;base64,(.+)$/.exec(dataUrl)
-    if (!match?.[1]) return { ok: false, message: 'invalid-region-capture' }
-    const saved = await persist(dataUrl, Buffer.from(match[1], 'base64'))
-    return { ok: true, path: saved.output, dataUrl: saved.dataUrl, message: '区域截图已捕获' }
+    const result = await captureRegionScreenshot()
+    if (!result) return { ok: false, message: 'region-capture-canceled' }
+    if (result === 'completed') return { ok: true, message: '截图处理完成' }
+    const payload = screenshotSessions.create(new Uint8Array(decodeScreenshotImage(result).toPNG()))
+    screenshotSessions.retainEditor(payload.document.id)
+    mainWindow?.webContents.send('screenshot:document', payload); showWindow()
+    return { ok: true, message: '截图已打开' }
   }
   const { desktopCapturer } = await import('electron')
-  const sources = await desktopCapturer.getSources({ types: [mode === 'Window' ? 'window' : 'screen'], thumbnailSize: { width: 3840, height: 2160 } })
-  const source = mode === 'Window' ? sources.find(item => item.id === sourceId) : sources.find(item => item.id.startsWith('screen:'))
+  const displays = screen.getAllDisplays()
+  const targetDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  const sources = await desktopCapturer.getSources({ types: [mode === 'Window' ? 'window' : 'screen'], thumbnailSize: { width: Math.max(...displays.map(display => Math.round(display.size.width * display.scaleFactor))), height: Math.max(...displays.map(display => Math.round(display.size.height * display.scaleFactor))) } })
+  const source = mode === 'Window' ? sources.find(item => item.id === sourceId) : sources.find(item => String(item.display_id) === String(targetDisplay.id))
   if (mode === 'Window' && !source) return { ok: false, message: 'capture-window-unavailable' }
   if (!source || source.thumbnail.isEmpty()) return { ok: false, message: 'no-capture-source' }
-  const saved = await persist(source.thumbnail.toDataURL(), source.thumbnail.toPNG())
-  return { ok: true, path: saved.output, dataUrl: saved.dataUrl, message: `${mode} 截图已捕获` }
+  const payload = screenshotSessions.create(mode === 'FullScreen' ? screenCaptureBytes(source.thumbnail, targetDisplay) : new Uint8Array(source.thumbnail.toPNG()))
+  if (settings.ScreenshotAfterAction === 'copy' || settings.ScreenshotAfterAction === 'pin') {
+    const result = await screenshotSessions.finish({ requestId: crypto.randomUUID(), document: payload.document, png: payload.png, action: settings.ScreenshotAfterAction })
+    return { ...result, message: result.ok ? '截图处理完成' : result.error }
+  }
+  await showScreenshotOverlay(payload, targetDisplay.bounds)
+  return { ok: true, message: '截图已打开' }
+}
+
+async function showScreenshotOverlay(payload: ScreenshotPayload, bounds: Electron.Rectangle) {
+  const window = new BrowserWindow({ ...bounds, frame: false, show: false, resizable: false, skipTaskbar: true, alwaysOnTop: true, webPreferences: { preload: path.join(__dirname, '../preload/index.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } })
+  overlayWindows.add(window); screenshotOverlayDocuments.set(window, payload.document.id)
+  window.on('closed', () => { overlayWindows.delete(window); const id = screenshotOverlayDocuments.get(window); screenshotOverlayDocuments.delete(window); if (id) screenshotSessions.remove(id) })
+  window.webContents.once('did-finish-load', () => { if (!window.isDestroyed()) { window.webContents.send('screenshot:document', payload); window.show(); window.focus() } })
+  try {
+    if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?overlay=1&selected=1`)
+    else await window.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { overlay: '1', selected: '1' } })
+  } catch (error) { window.destroy(); throw error }
+}
+
+async function saveScreenshotBytes(png: Uint8Array, saveAs = false, format?: 'png' | 'jpg', jpeg?: Uint8Array) {
+  const settings = (await readState()).Settings
+  const extension = format || (settings.ScreenshotFormat === 'jpg' || settings.ScreenshotFormat === 'jpeg' ? 'jpg' : 'png')
+  const directory = path.resolve(settings.ScreenshotSaveDirectory?.trim() || path.join(dataDirectory(), 'Screenshots'))
+  let output = uniqueFilePath(directory, 'DustDesk-edited', extension)
+  if (saveAs) {
+    const result = await dialog.showSaveDialog({ title: '另存为截图', defaultPath: output, filters: [{ name: 'PNG 图片', extensions: ['png'] }, { name: 'JPEG 图片', extensions: ['jpg', 'jpeg'] }] })
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+    output = result.filePath
+  }
+  await fs.mkdir(path.dirname(output), { recursive: true })
+  const image = nativeImage.createFromBuffer(Buffer.from(png))
+  let bytes: Buffer = Buffer.from(png)
+  if (/\.jpe?g$/i.test(output)) {
+    if (jpeg) {
+      if (jpeg.length > 32 * 1024 * 1024 || jpeg[0] !== 255 || jpeg[1] !== 216) throw Error('JPEG 导出数据无效')
+      const converted = nativeImage.createFromBuffer(Buffer.from(jpeg)), size = converted.getSize(), original = image.getSize()
+      if (converted.isEmpty() || size.width !== original.width || size.height !== original.height) throw Error('JPEG 导出尺寸不一致')
+      bytes = Buffer.from(jpeg)
+    } else bytes = image.toJPEG(92)
+  }
+  const temporary = `${output}.${crypto.randomUUID()}.tmp`
+  try { await fs.writeFile(temporary, bytes); await fs.rename(temporary, output) }
+  catch (error) { await fs.rm(temporary, { force: true }).catch(() => {}); throw error }
+  return { ok: true, path: output }
+}
+
+async function completeScreenshotOutput(request: ScreenshotFinishRequest, png: Uint8Array) {
+  if (request.action === 'openEditor') {
+    const payload = screenshotSessions.read(request.document.id)
+    const document = request.document.sourceRect ? screenshotSessions.snapshot(request.document) : request.document
+    screenshotSessions.retainEditor(document.id)
+    mainWindow?.webContents.send('screenshot:document', { ...payload, document }); showWindow()
+    return { ok: true }
+  }
+  const settings = (await readState()).Settings
+  let result: { ok: boolean; path?: string; canceled?: boolean; pinId?: string; warning?: string } = { ok: true }
+  if (request.action === 'save' || request.action === 'saveAs') result = await saveScreenshotBytes(png, request.action === 'saveAs', request.format, request.jpeg)
+  if (!result.ok) return result
+  if (request.action === 'pin') result = await createPinnedScreenshot(request.document, png)
+  if (request.action === 'updatePin') {
+    const pinId = request.document.targetPinId; const pin = pinId && pinnedScreenshots.get(pinId)
+    if (!pin || !pinId) throw Error('原贴图已关闭，请选择另存为或创建新贴图')
+    const previousId = pin.documentId
+    pin.png = new Uint8Array(png); pin.version++; pin.documentId = request.document.id; screenshotSessions.retainPin(pinId, request.document.id)
+    if (previousId !== request.document.id) screenshotSessions.remove(previousId)
+    pin.originalWidth = request.document.crop.width; pin.originalHeight = request.document.crop.height
+    pin.window.webContents.send('screenshot:pin:changed')
+  }
+  const image = nativeImage.createFromBuffer(Buffer.from(png))
+  const fingerprint = createHash('sha256').update(Buffer.from(png)).digest('hex')
+  if (request.action === 'copy' || settings.ScreenshotAutoCopy) try { clipboard.writeImage(image); lastClipboardFingerprint = createHash('sha256').update('').update(Buffer.from(png).toString('base64')).digest('hex') }
+  catch (error) { if (request.action === 'copy') throw error; result.warning = '输出已完成，自动复制失败，可点击复制重试' }
+  lastScreenshotDataUrl = image.toDataURL()
+  if (settings.ScreenshotAutoAddToClipboardHistory) try {
+    const { state } = await updateState(state => {
+      if (state.ClipboardHistory.some(record => record.ImageSha256 === fingerprint)) return
+      state.ClipboardHistory.unshift({ Id: crypto.randomUUID(), Kind: 'Image', Text: '', ImagePngBase64: Buffer.from(png).toString('base64'), ImageFileName: path.basename(result.path || 'Screenshot.png'), ImageSha256: fingerprint, CreatedAt: new Date().toISOString(), IsLocked: false, IsPinned: false })
+      state.ClipboardHistory = state.ClipboardHistory.filter((record, index) => index < 200 || record.IsLocked || record.IsPinned)
+    })
+    broadcastWorkspaceChanged(state)
+  } catch (error) { console.error('无法加入截图历史', error); result.warning = [result.warning, '输出已完成，加入剪贴板历史失败'].filter(Boolean).join('；') }
+  return result
+}
+
+async function createPinnedScreenshot(document: ScreenshotDocument, png: Uint8Array) {
+  const settings = (await readState()).Settings; const pinId = crypto.randomUUID()
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()), area = display.workArea
+  const fit = Math.min(1 / (display.scaleFactor || 1), (area.width * .7) / document.crop.width, (area.height * .7) / document.crop.height)
+  const window = new BrowserWindow({ width: Math.max(64, Math.round(document.crop.width * fit)), height: Math.max(48, Math.round(document.crop.height * fit)), minWidth: 32, minHeight: 32, show: false, frame: false, transparent: true, alwaysOnTop: settings.PinnedImageTopmost !== false, resizable: true, skipTaskbar: true, webPreferences: { preload: path.join(__dirname, '../preload/index.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } })
+  // A pin keeps the exact document represented by its PNG, independent of later editor saves.
+  document = screenshotSessions.snapshot(document)
+  const pin: PinnedScreenshot = { window, png: new Uint8Array(png), version: 0, documentId: document.id, opacity: Math.max(20, Math.min(100, settings.PinnedImageOpacityPercent || 100)), topmost: settings.PinnedImageTopmost !== false, locked: false, mouseThrough: Boolean(settings.PinnedImageMouseThrough), originalWidth: document.crop.width, originalHeight: document.crop.height }
+  pinnedScreenshots.set(pinId, pin); pinnedWindows.add(window); screenshotSessions.retainPin(pinId, document.id)
+  window.setOpacity(pin.opacity / 100); window.setAlwaysOnTop(pin.topmost, 'floating'); window.setIgnoreMouseEvents(pin.mouseThrough, { forward: true })
+  window.on('closed', () => { pinnedScreenshots.delete(pinId); pinnedWindows.delete(window); screenshotSessions.releasePin(pinId); screenshotSessions.remove(pin.documentId) })
+  try {
+    if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?pin=${pinId}`)
+    else await window.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { pin: pinId } })
+    if (!window.isDestroyed()) window.show()
+  } catch (error) { window.destroy(); throw error }
+  return { ok: true, pinId }
+}
+
+async function pinClipboardScreenshot() {
+  const image = clipboard.readImage()
+  if (!image.isEmpty()) {
+    const payload = screenshotSessions.create(new Uint8Array(image.toPNG()))
+    return createPinnedScreenshot(payload.document, payload.png)
+  }
+  if (lastScreenshotDataUrl) return pinScreenshotData(lastScreenshotDataUrl)
+  throw Error('剪贴板中没有图片，请先截图或复制一张图片')
+}
+
+async function controlPin(id: string, action: string, value: { opacity?: number; topmost?: boolean; locked?: boolean; mouseThrough?: boolean; x?: number; y?: number; width?: number; height?: number } = {}) {
+  const pin = pinnedScreenshots.get(id)
+  if (!pin || pin.window.isDestroyed()) throw Error('贴图已关闭')
+  const window = pin.window
+  if (action === 'close') window.close()
+  else if (action === 'copy') clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(pin.png)))
+  else if (action === 'save') window.webContents.send('screenshot:pin:save-request')
+  else if (action === 'edit') {
+    if (overlayWindows.size) throw Error('请先完成或取消当前截图')
+    const payload = screenshotSessions.editPin(id)
+    await showScreenshotOverlay(payload, screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).bounds)
+  } else if (action === 'options') {
+    if (typeof value.opacity === 'number' && Number.isFinite(value.opacity)) { pin.opacity = Math.max(20, Math.min(100, value.opacity)); window.setOpacity(pin.opacity / 100) }
+    if (typeof value.topmost === 'boolean') { pin.topmost = value.topmost; window.setAlwaysOnTop(pin.topmost, 'floating') }
+    if (typeof value.locked === 'boolean') { pin.locked = value.locked; window.setResizable(!pin.locked) }
+    if (typeof value.mouseThrough === 'boolean') { pin.mouseThrough = value.mouseThrough; window.setIgnoreMouseEvents(pin.mouseThrough, { forward: true }) }
+    window.webContents.send('screenshot:pin:changed')
+  } else if (action === 'move' && !pin.locked && Number.isFinite(value.x) && Number.isFinite(value.y)) {
+    window.setPosition(Math.round(Math.max(-32768, Math.min(32768, value.x!))), Math.round(Math.max(-32768, Math.min(32768, value.y!))))
+  } else if (action === 'resize' && !pin.locked && Number.isFinite(value.width) && Number.isFinite(value.height)) {
+    const area = screen.getDisplayMatching(window.getBounds()).workArea
+    const ratio = pin.originalWidth / pin.originalHeight
+    const width = Math.max(32, Math.min(area.width * 2, area.height * 2 * ratio, value.width!))
+    window.setSize(Math.round(width), Math.max(32, Math.round(width / ratio)))
+  } else if (action === 'menu') {
+    const run = (command: string, options?: typeof value) => { void controlPin(id, command, options).catch(error => { tray?.displayBalloon({ title: '贴图操作失败', content: error.message }) }) }
+    Menu.buildFromTemplate([
+      { label: '恢复原始比例', click: () => { const dpi = screen.getDisplayMatching(window.getBounds()).scaleFactor || 1; run('resize', { width: pin.originalWidth / dpi, height: pin.originalHeight / dpi }) } },
+      { label: '复制', accelerator: 'CommandOrControl+C', click: () => run('copy') },
+      { label: '保存…', accelerator: 'CommandOrControl+S', click: () => run('save') },
+      { label: '重新编辑', click: () => run('edit') },
+      { type: 'separator' },
+      { label: '置顶', type: 'checkbox', checked: pin.topmost, click: () => run('options', { topmost: !pin.topmost }) },
+      { label: '锁定位置', type: 'checkbox', checked: pin.locked, click: () => run('options', { locked: !pin.locked }) },
+      { label: '鼠标穿透（从托盘恢复）', type: 'checkbox', checked: pin.mouseThrough, click: () => run('options', { mouseThrough: !pin.mouseThrough }) },
+      { type: 'separator' },
+      { label: '关闭贴图', click: () => run('close') }
+    ]).popup({ window })
+  }
+  return { ok: true }
 }
 
 function decodeScreenshotImage(dataUrl: string) {
@@ -792,29 +1073,41 @@ function decodeScreenshotImage(dataUrl: string) {
 }
 
 async function pinScreenshotData(dataUrl: string) {
-  const image = decodeScreenshotImage(dataUrl)
-  const settings = (await readState()).Settings
-  const window = new BrowserWindow({ width: 620, height: 420, minWidth: 240, minHeight: 160, show: false, frame: false, transparent: true, alwaysOnTop: settings.PinnedImageTopmost, resizable: true, skipTaskbar: true, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
-  pinnedWindows.add(window); window.on('closed', () => pinnedWindows.delete(window)); window.setAlwaysOnTop(settings.PinnedImageTopmost !== false, 'floating'); window.setOpacity(Math.max(0.2, Math.min(1, Number(settings.PinnedImageOpacityPercent ?? 100) / 100))); if (settings.PinnedImageMouseThrough) window.setIgnoreMouseEvents(true, { forward: true })
-  const html = `<html lang="zh-CN"><body style="margin:0;background:transparent;overflow:hidden;-webkit-app-region:drag"><button aria-label="关闭贴图" title="关闭贴图（Esc）" onclick="window.close()" style="position:fixed;right:6px;top:6px;z-index:2;width:28px;height:28px;border:0;border-radius:14px;background:rgba(20,30,34,.85);color:#fff;font-size:16px;padding:0;-webkit-app-region:no-drag;cursor:pointer">&times;</button><img id="image" alt="桌面贴图" draggable="false" style="display:block;width:100%;height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;-webkit-app-region:drag" /></body><script>document.getElementById('image').src=${JSON.stringify(image.toDataURL())};document.addEventListener('keydown',event=>{if(event.key==='Escape')window.close()})</script></html>`
-  try {
-    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-    if (!window.isDestroyed()) window.show()
-  } catch (error) {
-    if (!window.isDestroyed()) window.destroy()
-    throw error
-  }
-  return { ok: true }
+  const payload = screenshotSessions.create(new Uint8Array(decodeScreenshotImage(dataUrl).toPNG()))
+  return createPinnedScreenshot(payload.document, payload.png)
 }
 
-async function sampleSystemMetrics(): Promise<SystemMetrics> {
+let metricsInFlight: Promise<SystemMetrics> | null = null
+let recentMetrics: { expires: number; value: SystemMetrics } | null = null
+function sampleSystemMetrics(): Promise<SystemMetrics> {
+  if (recentMetrics && recentMetrics.expires > Date.now()) return Promise.resolve(recentMetrics.value)
+  if (metricsInFlight) return metricsInFlight
+  const operation = collectSystemMetrics().then(value => { recentMetrics = { expires: Date.now() + 2000, value }; return value })
+  metricsInFlight = operation
+  void operation.then(() => { metricsInFlight = null }, () => { metricsInFlight = null })
+  return operation
+}
+
+async function listBackupEntries() {
+  const directory = path.join(dataDirectory(), 'Backups')
+  await assertPathWithinRoot(dataDirectory(), directory)
+  const entries = (await fs.readdir(directory, { withFileTypes: true })).filter(item => item.isFile() && item.name.toLowerCase().endsWith('.json'))
+  const files = await Promise.all(entries.map(async item => {
+    const filePath = path.join(directory, item.name)
+    const info = await fs.stat(filePath)
+    return { path: filePath, name: item.name, size: info.size, modifiedAt: info.mtime.toISOString() }
+  }))
+  return files.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt) || b.name.localeCompare(a.name))
+}
+
+async function collectSystemMetrics(): Promise<SystemMetrics> {
   const fallbackTotal = os.totalmem()
   const [load, memory, disks, network, diskIo, latency, time] = await Promise.all([
     si.currentLoad().catch(() => null),
     si.mem().catch(() => null),
     si.fsSize().catch(() => []),
     si.networkStats().catch(() => []),
-    si.disksIO().catch(() => null),
+    process.platform === 'win32' ? sampleWindowsDiskThroughput() : si.fsStats().then(value => ({ read: byteRate(value?.rx_sec), write: byteRate(value?.wx_sec) })).catch(() => ({ read: null, write: null })),
     si.inetLatency('1.1.1.1').catch(() => -1),
     Promise.resolve().then(() => si.time()).catch(() => ({ uptime: os.uptime() }))
   ])
@@ -829,8 +1122,8 @@ async function sampleSystemMetrics(): Promise<SystemMetrics> {
     TotalMemoryBytes: totalMemory,
     DownloadBytesPerSecond: networkRows.reduce((sum, row) => sum + Math.max(0, Number(row.rx_sec ?? 0)), 0),
     UploadBytesPerSecond: networkRows.reduce((sum, row) => sum + Math.max(0, Number(row.tx_sec ?? 0)), 0),
-    DiskReadBytesPerSecond: Math.max(0, Number(diskIo?.rIO_sec ?? 0)),
-    DiskWriteBytesPerSecond: Math.max(0, Number(diskIo?.wIO_sec ?? 0)),
+    DiskReadBytesPerSecond: diskIo.read,
+    DiskWriteBytesPerSecond: diskIo.write,
     DiskSpaces: diskRows.filter(row => Number(row.size) > 0).map(row => ({
       DriveName: String(row.mount ?? row.fs ?? ''),
       FreeBytes: Math.max(0, Number(row.available ?? 0)),
@@ -904,30 +1197,33 @@ function registerIpc() {
     if (!Array.isArray(keys) || keys.length > 100) return {}
     return Object.fromEntries(keys.filter(validWidgetKey).map(key => { const window = widgetWindows.get(key); return [key, Boolean(window && !window.isDestroyed() && window.isVisible())] }))
   })
+  ipcMain.handle('widgets:visibility:set', async (_event, key: string, visible: boolean) => {
+    try {
+      if (!validWidgetKey(key) || typeof visible !== 'boolean') throw new Error('小组件显示参数无效')
+      return { ok: true, ...await setWidgetVisibility(key, visible) }
+    } catch (error) {
+      const window = widgetWindows.get(key)
+      return { ok: false, visible: Boolean(window && !window.isDestroyed() && window.isVisible()), error: error instanceof Error ? error.message : String(error) }
+    }
+  })
   ipcMain.handle('widgets:move', async (_event, key: string, x: number, y: number, commit = false) => {
     if (!validWidgetKey(key) || !Number.isFinite(x) || !Number.isFinite(y)) return { ok: false, error: '小组件位置无效' }
     const window = widgetWindows.get(key); if (!window || window.isDestroyed()) return { ok: false, error: '小组件窗口不可用' }
     if (lockedWidgets.has(key)) return { ok: false, error: '小组件已锁定位置' }
-    window.setPosition(Math.round(x), Math.round(y))
-    const persistPosition = async () => {
-      if (window.isDestroyed()) return { ok: false, error: '小组件窗口不可用' }
-      let { x: nextX, y: nextY } = window.getBounds()
-      const currentState = await readState(); const current = currentState.Settings.WidgetPlacements?.[key] as WidgetPlacement | undefined
-      if (current?.SnapToEdges) {
-        const { width, height } = window.getBounds()
-        const display = screen.getDisplayNearestPoint({ x: nextX + Math.round(width / 2), y: nextY + Math.round(height / 2) })
-        const area = display.workArea; const distance = 18
-        if (Math.abs(nextX - area.x) <= distance) nextX = area.x
-        else if (Math.abs(area.x + area.width - (nextX + width)) <= distance) nextX = area.x + area.width - width
-        if (Math.abs(nextY - area.y) <= distance) nextY = area.y
-        else if (Math.abs(area.y + area.height - (nextY + height)) <= distance) nextY = area.y + area.height - height
-      }
-      window.setPosition(nextX, nextY)
-      const { state } = await updateState(state => { const latest = state.Settings.WidgetPlacements?.[key] as WidgetPlacement | undefined; state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...(latest ?? {}), X: nextX, Y: nextY } } })
+    const version = (widgetDragVersions.get(key) ?? 0) + 1
+    widgetDragVersions.set(key, version)
+    widgetMovePreviews.add(key)
+    // Preview snapping stays in memory; never read/write the workspace per frame.
+    const next = widgetSnappedBounds(key, { ...window.getBounds(), x: Math.round(x), y: Math.round(y) })
+    window.setPosition(next.x, next.y)
+    if (!commit) return { ok: true }
+    try {
+      const { state } = await updateState(state => { const latest = state.Settings.WidgetPlacements?.[key]; state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...(latest ?? {}), X: next.x, Y: next.y, DockEdge: next.dockEdge } } })
       broadcastWorkspaceChanged(state)
       return { ok: true }
+    } finally {
+      if (widgetDragVersions.get(key) === version) widgetMovePreviews.delete(key)
     }
-    return commit ? persistPosition() : { ok: true }
   })
   ipcMain.handle('widgets:resize', async (_event, key: string, width: number, height: number, commit = false) => {
     if (!validWidgetKey(key) || !Number.isFinite(width) || !Number.isFinite(height)) return { ok: false, error: '小组件尺寸无效' }
@@ -955,24 +1251,30 @@ function registerIpc() {
   })
   ipcMain.handle('widgets:hide', async (_event, key: string) => {
     if (!validWidgetKey(key)) return { ok: false, error: '小组件标识无效' }
-    const window = widgetWindows.get(key)
-    if (window && !window.isDestroyed()) window.hide()
-    const { state } = await updateState(state => { const current = state.Settings.WidgetPlacements?.[key] ?? {}; state.Settings.WidgetPlacements = { ...(state.Settings.WidgetPlacements ?? {}), [key]: { ...current, Visible: false } } })
-    broadcastWorkspaceChanged(state)
-    broadcastWidgetVisibility(key, false)
-    return { ok: true }
+    try { await setWidgetVisibility(key, false); return { ok: true } }
+    catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   })
   ipcMain.handle('widgets:options', async (_event, key: string, options: { locked?: boolean; topMost?: boolean; transparentBackground?: boolean; autoCollapse?: boolean; collapsed?: boolean; snapToEdges?: boolean; height?: number }) => {
     if (!validWidgetKey(key) || !options || typeof options !== 'object') return { ok: false, error: '小组件参数无效' }
     const requestedHeight = key === 'search' && Number.isFinite(options.height) ? Math.max(52, Math.min(480, Math.round(Number(options.height)))) : undefined
     let placement: WidgetPlacement = {}
+    const window = widgetWindows.get(key)
     const { state } = await updateState(latest => {
       const current = latest.Settings.WidgetPlacements?.[key]
       placement = { ...(current ?? {}), ...(options.locked === undefined ? {} : { Locked: Boolean(options.locked) }), ...(options.topMost === undefined ? {} : { TopMost: Boolean(options.topMost) }), ...(options.transparentBackground === undefined ? {} : { TransparentBackground: Boolean(options.transparentBackground) }), ...(options.autoCollapse === undefined ? {} : { AutoCollapseEnabled: Boolean(options.autoCollapse) }), ...(options.collapsed === undefined ? {} : { IsCollapsed: Boolean(options.collapsed) }), ...(options.snapToEdges === undefined ? {} : { SnapToEdges: Boolean(options.snapToEdges) }), ...(requestedHeight === undefined ? {} : { Height: requestedHeight }) }
+      if (options.snapToEdges === false) placement.DockEdge = 'None'
+      if (options.snapToEdges === true && window && !window.isDestroyed() && !placement.Locked) {
+        const next = widgetSnappedBounds(key, window.getBounds(), true)
+        placement = { ...placement, X: next.x, Y: next.y, DockEdge: next.dockEdge }
+      }
       latest.Settings.WidgetPlacements = { ...(latest.Settings.WidgetPlacements ?? {}), [key]: placement }
     })
-    const window = widgetWindows.get(key)
     if (window && !window.isDestroyed()) {
+      widgetSnapModes.set(key, widgetSnappingEnabled(key, state))
+      if (options.snapToEdges === true && !placement.Locked && placement.X !== undefined && placement.Y !== undefined) {
+        suppressWidgetPlacementSave(key)
+        window.setPosition(placement.X, placement.Y)
+      }
       if (placement.Locked) lockedWidgets.add(key)
       else lockedWidgets.delete(key)
       if (options.locked !== undefined) { window.setResizable(key !== 'search' && !options.locked); window.setMovable(!options.locked) }
@@ -1004,10 +1306,19 @@ function registerIpc() {
   })
   ipcMain.handle('widgets:presets:delete', async (_event, name: string) => { let found = false; const { state } = await updateState(state => { if (!state.Settings.WidgetLayoutPresets?.[name]) return; found = true; delete state.Settings.WidgetLayoutPresets[name] }); if (!found) return { ok: false, error: '布局不存在' }; broadcastWorkspaceChanged(state); return { ok: true } })
   ipcMain.handle('path:open', async (_event, target: string) => { if (typeof target !== 'string' || target.length > 4096) return { ok: false, error: '路径无效' }; return { ok: !await shell.openPath(target) } })
+  ipcMain.handle('path:icon', (_event, target: unknown) => {
+    if (typeof target !== 'string' || target.length > 4096 || target.includes('\0') || !path.isAbsolute(target)) return {}
+    return pathIcons.read(target)
+  })
   ipcMain.handle('path:context-menu', async (event, target: string) => { try { if (typeof target !== 'string' || target.length > 4096) throw new Error('路径无效'); const sender = BrowserWindow.fromWebContents(event.sender); if (!sender) throw new Error('窗口不可用'); const menu = Menu.buildFromTemplate([{ label: '打开', click: () => { void shell.openPath(target) } }, { label: '在资源管理器中显示', click: () => shell.showItemInFolder(target) }, { label: '复制路径', click: () => clipboard.writeText(target) }]); menu.popup({ window: sender }); return { ok: true } } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })
   ipcMain.handle('url:open', async (_event, target: string) => { try { const value = target.trim(); if (!isHttpUrl(value)) throw new Error('只允许打开 HTTP/HTTPS 链接'); await shell.openExternal(value); return { ok: true } } catch (error) { return { ok: false, error: String(error) } } })
   ipcMain.handle('clipboard:read', () => ({ text: clipboard.readText(), imagePngBase64: clipboard.readImage().isEmpty() ? '' : clipboard.readImage().toPNG().toString('base64') }))
-  ipcMain.handle('clipboard:write', (_event, content: { text?: string; imagePngBase64?: string }) => {
+  ipcMain.handle('clipboard:write', async (_event, content: { text?: string; imagePngBase64?: string; recordId?: string }) => {
+    if (content?.recordId !== undefined) {
+      const item = (await readState()).ClipboardHistory.find(item => item.Id === content.recordId)
+      if (!item) throw new Error('剪贴板记录已删除')
+      content = item.Kind === 'Image' ? { imagePngBase64: await clipboardAssets.read(item) } : { text: item.Text }
+    }
     if (!content || (content.text === undefined && !content.imagePngBase64)) throw new Error('剪贴板内容为空')
     if (content.text !== undefined && (typeof content.text !== 'string' || content.text.length > 5_000_000)) throw new Error('剪贴板文本过大')
     if (content.text !== undefined) clipboard.writeText(content.text)
@@ -1026,6 +1337,79 @@ function registerIpc() {
     } catch (error) { return { ok: false, message: error instanceof Error ? error.message : '无法读取窗口列表，请重试' } }
   })
   ipcMain.handle('screenshot:start', async (_event, mode: 'Region' | 'Window' | 'FullScreen' = 'Region', sourceId?: string) => captureScreenshot(mode, sourceId))
+  const ownsDocument = (event: Electron.IpcMainInvokeEvent, id: string) => {
+    const sender = BrowserWindow.fromWebContents(event.sender)
+    return Boolean(sender && (sender === mainWindow || screenshotOverlayDocuments.get(sender) === id))
+  }
+  ipcMain.handle('screenshot:document:create', (event, bytes: Uint8Array) => {
+    try {
+      if (BrowserWindow.fromWebContents(event.sender) !== mainWindow) throw Error('只能在编辑页面导入图片')
+      const payload = screenshotSessions.create(new Uint8Array(bytes)); screenshotSessions.retainEditor(payload.document.id)
+      return { ok: true, payload }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+  })
+  ipcMain.handle('screenshot:document:read', (event, id: string) => {
+    try { const sender = BrowserWindow.fromWebContents(event.sender)!; id = id || screenshotOverlayDocuments.get(sender) || ''; if (!ownsDocument(event, id)) throw Error('无法访问该截图'); return { ok: true, payload: { ...screenshotSessions.read(id), ...screenshotRegionMetadata.get(sender) } } }
+    catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+  })
+  ipcMain.handle('screenshot:region-select', async (event, rect: ScreenshotRect, action: 'edit' | 'copy' | 'save' | 'pin' = 'edit', tool: ScreenshotTool = 'select') => {
+    const sender = BrowserWindow.fromWebContents(event.sender), display = sender && screenshotRegionDisplays.get(sender)
+    if (!sender || !display || !activeOverlayResolve) return { ok: false, error: '框选会话已结束' }
+    if (screenshotRegionRequests.size) return { ok: false, error: '正在捕获选区，请稍候' }
+    if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.width < 2 || rect.height < 2 || rect.x < 0 || rect.y < 0 || rect.x + rect.width > display.bounds.width || rect.y + rect.height > display.bounds.height || !['edit', 'copy', 'save', 'pin'].includes(action) || !['select', 'pen', 'highlighter', 'line', 'arrow', 'rectangle', 'ellipse', 'text', 'number', 'mosaic', 'blur', 'cover'].includes(tool)) return { ok: false, error: '请选择屏幕内的有效区域' }
+    const controller = new AbortController(); screenshotRegionRequests.set(sender, controller)
+    try {
+      const physical = screen.dipToScreenRect(sender, { x: display.bounds.x + rect.x, y: display.bounds.y + rect.y, width: rect.width, height: rect.height })
+      if (controller.signal.aborted) throw Error('截图已取消')
+      const png = await captureWindowsRegion(physical, controller.signal)
+      if (controller.signal.aborted || sender.isDestroyed() || !activeOverlayResolve) throw Error('截图已取消')
+      const physicalDisplay = screen.dipToScreenRect(sender, display.bounds)
+      const sourceRect = { x: physical.x - physicalDisplay.x, y: physical.y - physicalDisplay.y, width: physical.width, height: physical.height }
+      const payload: ScreenshotPayload = { ...screenshotSessions.create(png, { width: physicalDisplay.width, height: physicalDisplay.height, rect: sourceRect }), placement: { x: 0, y: 0, width: display.bounds.width, height: display.bounds.height }, initialTool: tool, initialAction: action === 'edit' ? undefined : action }
+      const previousId = screenshotOverlayDocuments.get(sender)
+      screenshotOverlayDocuments.set(sender, payload.document.id)
+      screenshotRegionMetadata.set(sender, { placement: payload.placement, initialTool: tool, initialAction: payload.initialAction })
+      if (previousId) screenshotSessions.remove(previousId)
+      return { ok: true, payload }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    } finally { screenshotRegionRequests.delete(sender) }
+  })
+  ipcMain.handle('screenshot:document:discard', (event, id: string) => { if (ownsDocument(event, id)) { screenshotSessions.releaseEditor(id); screenshotSessions.remove(id) } })
+  ipcMain.handle('screenshot:finish', async (event, request: ScreenshotFinishRequest) => {
+    if (!ownsDocument(event, request?.document?.id)) return { ok: false, error: '截图会话已结束' }
+    const result = await screenshotSessions.finish(request)
+    const sender = BrowserWindow.fromWebContents(event.sender)
+    if (result.ok && sender && overlayWindows.has(sender)) {
+      if (request.action === 'openEditor' && !request.document.sourceRect) screenshotOverlayDocuments.delete(sender)
+      const resolve = activeOverlayResolve; activeOverlayResolve = null; resolve?.('completed')
+      for (const window of overlayWindows) if (!window.isDestroyed()) window.close()
+    }
+    return result
+  })
+  ipcMain.handle('screenshot:pin:read', (event, id: string, version?: number) => {
+    const pin = pinnedScreenshots.get(id)
+    if (!pin || BrowserWindow.fromWebContents(event.sender) !== pin.window) return { ok: false, error: '贴图已关闭' }
+    return { ok: true, png: version === pin.version ? undefined : new Uint8Array(pin.png), version: pin.version, width: pin.originalWidth, height: pin.originalHeight, opacity: pin.opacity, topmost: pin.topmost, locked: pin.locked, mouseThrough: pin.mouseThrough }
+  })
+  const pinSaveLocks = new Set<string>()
+  ipcMain.handle('screenshot:pin:save', async (event, id: string, jpeg: Uint8Array, version: number) => {
+    try {
+      const pin = pinnedScreenshots.get(id)
+      if (!pin || BrowserWindow.fromWebContents(event.sender) !== pin.window) throw Error('贴图已关闭')
+      if (pin.version !== version) throw Error('贴图已更新，请重新保存')
+      if (pinSaveLocks.has(id)) return { ok: false, error: '正在保存该贴图' }
+      pinSaveLocks.add(id)
+      try { return await saveScreenshotBytes(pin.png, true, undefined, new Uint8Array(jpeg)) }
+      finally { pinSaveLocks.delete(id) }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+  })
+  ipcMain.handle('screenshot:pin:control', async (event, id: string, action: string, value?: Parameters<typeof controlPin>[2]) => {
+    try {
+      if (BrowserWindow.fromWebContents(event.sender) !== pinnedScreenshots.get(id)?.window) throw Error('无法控制该贴图')
+      return await controlPin(id, action, value)
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
+  })
   ipcMain.handle('screenshot:overlay-submit', (event, dataUrl: string) => {
     const sender = BrowserWindow.fromWebContents(event.sender)
     if (!activeOverlayResolve || !sender || !overlayWindows.has(sender)) return { ok: false }
@@ -1035,7 +1419,7 @@ function registerIpc() {
     for (const window of overlayWindows) { if (!window.isDestroyed()) window.destroy() }; overlayWindows.clear()
     return { ok: true }
   })
-  ipcMain.handle('screenshot:overlay-cancel', () => { const resolve = activeOverlayResolve; activeOverlayResolve = null; resolve?.(null); for (const window of overlayWindows) { if (!window.isDestroyed()) window.destroy() }; overlayWindows.clear(); return { ok: true } })
+  ipcMain.handle('screenshot:overlay-cancel', event => { const sender = BrowserWindow.fromWebContents(event.sender); if (!sender || !overlayWindows.has(sender)) return { ok: false }; const resolve = activeOverlayResolve; activeOverlayResolve = null; resolve?.(null); for (const window of overlayWindows) { if (!window.isDestroyed()) window.destroy() }; overlayWindows.clear(); return { ok: true } })
   ipcMain.handle('screenshot:save', async (_event, dataUrl: string) => {
     try { const image = decodeScreenshotImage(dataUrl); const settings = (await readState()).Settings; const extension = settings.ScreenshotFormat === 'jpg' || settings.ScreenshotFormat === 'jpeg' ? 'jpg' : 'png'; const directory = path.resolve(settings.ScreenshotSaveDirectory?.trim() || path.join(dataDirectory(), 'Screenshots')); await fs.mkdir(directory, { recursive: true }); const output = uniqueFilePath(directory, 'DustDesk-edited', extension); await fs.writeFile(output, extension === 'jpg' ? image.toJPEG(92) : image.toPNG()); return { ok: true, path: output } }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
@@ -1172,14 +1556,13 @@ function registerIpc() {
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   })
   ipcMain.handle('maintenance:list', async () => {
-    try { const directory = path.join(dataDirectory(), 'Backups'); await assertPathWithinRoot(dataDirectory(), directory); const entries = (await fs.readdir(directory, { withFileTypes: true })).filter(item => item.isFile() && item.name.endsWith('.json')); return Promise.all(entries.map(async item => { const filePath = path.join(directory, item.name); const info = await fs.stat(filePath); return { path: filePath, name: item.name, size: info.size, modifiedAt: info.mtime.toISOString() } })).then(items => items.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))) } catch { return [] }
+    try { return await listBackupEntries() } catch { return [] }
   })
   ipcMain.handle('maintenance:restore', async (_event, target?: string, fingerprint?: string) => {
     try {
       const directory = path.resolve(path.join(dataDirectory(), 'Backups'))
       await assertPathWithinRoot(dataDirectory(), directory)
-      const entries = (await fs.readdir(directory, { withFileTypes: true })).filter(item => item.isFile() && item.name.toLowerCase().endsWith('.json')).sort((a, b) => b.name.localeCompare(a.name))
-      const selected = typeof target === 'string' && target ? path.resolve(target) : entries[0] ? path.join(directory, entries[0].name) : ''
+      const selected = typeof target === 'string' && target ? path.resolve(target) : (await listBackupEntries())[0]?.path ?? ''
        if (!selected || !isWithinDirectory(directory, selected) || !selected.toLowerCase().endsWith('.json') || !(await isRealPathWithinDirectory(directory, selected))) throw new Error('备份路径无效')
       const inspected = await productivity.inspect(selected)
       if (fingerprint && fingerprint !== inspected.preview.fingerprint) throw new Error('备份已变化，请重新预览')
@@ -1189,13 +1572,18 @@ function registerIpc() {
       if (!restored) throw new Error('备份文件格式无效')
       const state = await enqueueWorkspaceOperation(async () => {
         await productivity.protectBeforeRestore()
-        await productivity.restoreAssets(restored)
-        if (restored.ActiveFocus) {
-          restored.ActiveFocus.ElapsedSeconds = focusElapsed(restored.ActiveFocus, Date.parse(restored.ActiveFocus.CheckpointAt))
-          restored.ActiveFocus.RunningSince = null
+        const rollbackAssets = await productivity.restoreAssets(restored)
+        try {
+          if (restored.ActiveFocus) {
+            restored.ActiveFocus.ElapsedSeconds = focusElapsed(restored.ActiveFocus, Date.parse(restored.ActiveFocus.CheckpointAt))
+            restored.ActiveFocus.RunningSince = null
+          }
+          await writeState(restored, false)
+          return restored
+        } catch (error) {
+          await rollbackAssets()
+          throw error
         }
-        await writeState(restored, false)
-        return restored
       })
       clipboardMonitoringEnabled = state.Settings.ClipboardMonitoringEnabled !== false
       registerHotkeys(state.Settings)
@@ -1205,56 +1593,76 @@ function registerIpc() {
     }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   })
-  ipcMain.handle('search:files', async (_event, query: string) => {
-    if (typeof query !== 'string' || query.trim().length < 2 || query.length > 256) return []
-    const state = await readState(); const projectRoots = state.Settings.SearchProjectPaths ? state.Projects.flatMap(project => [project.ProjectPath, ...project.Phases.flatMap(phase => [phase.ProjectPath, ...phase.Subtasks.map(item => item.FilePath)])].filter(Boolean).map(target => { try { return existsSync(target) && fs.stat(target).then(info => info.isDirectory() ? target : path.dirname(target)).catch(() => '') } catch { return '' } })) : []; const resolvedProjectRoots = (await Promise.all(projectRoots)).filter((root): root is string => typeof root === 'string' && Boolean(root)); const configuredRoots = [state.Settings.SearchDesktopFiles ? desktopDirectory() : '', state.Settings.SearchStartMenuApps ? path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs') : '', state.Settings.SearchAppData ? app.getPath('appData') : '', ...resolvedProjectRoots, ...(state.Settings.SearchCustomPaths ? (state.Settings.SearchCustomRoots ?? []) : [])]; const roots = [...new Set(configuredRoots.filter(root => typeof root === 'string' && existsSync(root)).map(root => path.resolve(root)))]; const needle = query.trim().toLowerCase(); const results: { Name: string; Path: string; IsDirectory: boolean }[] = []
-    for (const root of roots.slice(0, 10)) {
-      await searchDirectory(root, needle, results)
-      if (results.length >= 40) break
+  ipcMain.handle('search:cancel', (event, requestId: string) => {
+    const active = fileSearches.get(event.sender.id)
+    if (active?.requestId === requestId) { active.controller.abort(); fileSearches.delete(event.sender.id) }
+  })
+  ipcMain.handle('search:files', async (event, query: string, requestId = crypto.randomUUID()) => {
+    const owner = event.sender.id
+    fileSearches.get(owner)?.controller.abort()
+    const active = { requestId, controller: new AbortController() }
+    fileSearches.set(owner, active)
+    if (!fileSearchOwners.has(event.sender)) {
+      fileSearchOwners.add(event.sender)
+      event.sender.once('destroyed', () => { fileSearches.get(owner)?.controller.abort(); fileSearches.delete(owner) })
     }
-    return results
+    const { signal } = active.controller
+    try {
+      if (typeof query !== 'string' || query.trim().length < 2 || query.length > 256) return []
+      const state = await readState()
+      if (signal.aborted) return []
+      const projectPaths = state.Settings.SearchProjectPaths ? state.Projects.flatMap(project => [project.ProjectPath, ...project.Phases.flatMap(phase => [phase.ProjectPath, ...phase.Subtasks.map(item => item.FilePath)])]).filter(Boolean) : []
+      const projectRoots = await Promise.all([...new Set(projectPaths)].map(async target => {
+        if (signal.aborted) return ''
+        try { return (await fs.stat(target)).isDirectory() ? target : path.dirname(target) } catch { return '' }
+      }))
+      if (signal.aborted) return []
+      const roots = [
+        state.Settings.SearchDesktopFiles ? desktopDirectory() : '',
+        state.Settings.SearchStartMenuApps ? path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs') : '',
+        state.Settings.SearchAppData ? app.getPath('appData') : '',
+        ...projectRoots,
+        ...(state.Settings.SearchCustomPaths ? state.Settings.SearchCustomRoots : [])
+      ].filter(Boolean)
+      return await searchFiles(roots, query, signal)
+    } finally { if (fileSearches.get(owner) === active) fileSearches.delete(owner) }
   })
   ipcMain.handle('hotkeys:set', async (_event, keys: { mainWindow?: string; widgets?: string; screenshot?: string; pin?: string; quickCapture?: string }) => {
+    if (!keys || typeof keys !== 'object') return { ok: false, error: '快捷键格式无效' }
     const values = [keys.mainWindow, keys.widgets, keys.screenshot, keys.pin, keys.quickCapture].filter(value => value !== undefined)
     if (values.some(value => typeof value !== 'string' || value.length > 80)) return { ok: false, error: '快捷键格式无效' }
     try {
-      const { state } = await updateState(state => {
+      const state = await enqueueWorkspaceOperation(async () => {
+        const state = await readState()
         const previous = { ...state.Settings }
-        if (keys.mainWindow !== undefined) state.Settings.MainWindowHotKey = keys.mainWindow
-        if (keys.widgets !== undefined) state.Settings.DesktopWidgetsHotKey = keys.widgets
-        if (keys.screenshot !== undefined) state.Settings.ScreenshotHotKey = keys.screenshot
-        if (keys.quickCapture !== undefined) state.Settings.QuickCaptureHotKey = keys.quickCapture
-        if (keys.pin !== undefined) state.Settings.PinScreenshotHotKey = keys.pin
-        const accelerators = [state.Settings.MainWindowHotKey, state.Settings.DesktopWidgetsHotKey, state.Settings.ScreenshotHotKey, state.Settings.PinScreenshotHotKey, state.Settings.QuickCaptureHotKey].map(value => value.trim().toLowerCase()).filter(Boolean)
-        if (new Set(accelerators).size !== accelerators.length) { registerHotkeys(previous); throw new Error('快捷键不能重复') }
-        if (!registerHotkeys(state.Settings)) { registerHotkeys(previous); throw new Error('快捷键无效或已被其他程序占用') }
+        try {
+          if (keys.mainWindow !== undefined) state.Settings.MainWindowHotKey = keys.mainWindow
+          if (keys.widgets !== undefined) state.Settings.DesktopWidgetsHotKey = keys.widgets
+          if (keys.screenshot !== undefined) state.Settings.ScreenshotHotKey = keys.screenshot
+          if (keys.quickCapture !== undefined) state.Settings.QuickCaptureHotKey = keys.quickCapture
+          if (keys.pin !== undefined) state.Settings.PinScreenshotHotKey = keys.pin
+          const accelerators = [state.Settings.MainWindowHotKey, state.Settings.DesktopWidgetsHotKey, state.Settings.ScreenshotHotKey, state.Settings.PinScreenshotHotKey, state.Settings.QuickCaptureHotKey].map(value => value.trim().toLowerCase()).filter(Boolean)
+          if (new Set(accelerators).size !== accelerators.length) throw new Error('快捷键不能重复')
+          if (!registerHotkeys(state.Settings)) throw new Error('快捷键无效或已被其他程序占用')
+          await writeState(state)
+          return state
+        } catch (error) {
+          // Roll back before releasing the mutation queue, so a later change wins.
+          registerHotkeys(previous)
+          throw error
+        }
       })
       broadcastWorkspaceChanged(state)
       return { ok: true }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
   })
   ipcMain.handle('projects:export', exportProjects)
-  ipcMain.handle('update:check', async () => { try { const result = await autoUpdater.checkForUpdates(); return { ok: true, available: Boolean(result?.updateInfo.version), version: result?.updateInfo.version } } catch (error) { return { ok: false, available: false, error: error instanceof Error ? error.message : String(error) } } })
-  ipcMain.handle('update:download', async () => { try { await autoUpdater.downloadUpdate(); return { ok: true } } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })
-  ipcMain.handle('update:install', async () => {
-    if (waitingForQuit) return { ok: false, error: '正在保存并退出' }
-    waitingForQuit = true
-    try { await prepareToQuit(); isQuitting = true; readyToQuit = true; autoUpdater.quitAndInstall(); return { ok: true } }
-    catch (error) { resumeAfterQuitFailure(); return { ok: false, error: error instanceof Error ? error.message : String(error) } }
-  })
+  ipcMain.handle('update:check', () => releaseUpdates.check())
 }
 
 app.whenReady().then(() => {
   if (!singleInstanceLock) return
   if (process.platform === 'win32') app.setAppUserModelId('com.dustdesk.next')
-  const feedUrl = process.env.DUSTDESK_UPDATE_FEED_URL
-  if (feedUrl) {
-    try {
-      const parsed = new URL(feedUrl)
-      if (parsed.protocol === 'https:') autoUpdater.setFeedURL({ provider: 'generic', url: parsed.toString().endsWith('/') ? parsed.toString() : `${parsed.toString()}/` })
-    } catch { /* ignore invalid test or local override and use packaged publish config */ }
-  }
-  autoUpdater.autoDownload = false
   registerIpc(); void productivity.start().catch(error => console.error(error)); createApplicationMenu(); createWindow(); createTray(); startClipboardMonitor()
   reminderTimer = setInterval(() => { void checkTodoReminders().catch(() => undefined) }, 30_000)
   void checkTodoReminders().catch(() => undefined)
@@ -1321,4 +1729,4 @@ app.on('before-quit', event => {
   })
 })
 app.on('window-all-closed', () => { /* The tray keeps the application running. */ })
-app.on('will-quit', () => { productivity.dispose(); globalShortcut.unregisterAll(); if (clipboardTimer) clearInterval(clipboardTimer); if (reminderTimer) clearInterval(reminderTimer); for (const window of widgetWindows.values()) window.destroy(); closePinnedWindows(); tray?.destroy() })
+app.on('will-quit', () => { productivity.dispose(); globalShortcut.unregisterAll(); if (clipboardTimer) clearInterval(clipboardTimer); if (reminderTimer) clearInterval(reminderTimer); for (const window of widgetWindows.values()) window.destroy(); closePinnedWindows(); for (const window of overlayWindows) if (!window.isDestroyed()) window.destroy(); screenshotSessions.clear(); tray?.destroy() })

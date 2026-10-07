@@ -1,9 +1,17 @@
 {
   "name": "dustdesk-electron",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "author": "DustDesk",
   "description": "DustDesk local desktop workspace, rebuilt with Electron.",
+  "homepage": "https://github.com/Xu-qingsong/DustDesk-Next",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Xu-qingsong/DustDesk-Next.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Xu-qingsong/DustDesk-Next/issues"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -11,10 +19,14 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test tests/**/*.test.mjs",
+    "check:silent": "npm run typecheck && npm test && npm run build && node --test --test-concurrency=1 tests/renderer-headless.mjs tests/screenshot-headless.mjs",
+    "test:screenshot:silent": "npm run build && node --test tests/screenshot-document.test.mjs tests/screenshot-main.test.mjs tests/screenshot-headless.mjs",
+    "test:renderer:silent": "npm run build && node --test tests/renderer-headless.mjs",
     "e2e": "npm run build && node tests/e2e-smoke.mjs",
     "e2e:widgets": "npm run build && node tests/widget-restart.mjs",
     "e2e:regressions": "npm run build && node tests/logic-regressions.mjs",
     "e2e:review": "npm run build && node tests/review-regressions.mjs",
+    "e2e:optimizations": "npm run build && node tests/optimization-regressions.mjs",
     "e2e:features": "npm run build && node tests/feature-completion-regressions.mjs",
     "e2e:productivity": "npm run build && node tests/productivity.mjs",
     "e2e:ui-fixes": "npm run build && node tests/ui-layout-regressions.mjs && node tests/note-drafts.mjs && node tests/search-navigation.mjs && node tests/resource-health-regressions.mjs",
@@ -35,7 +47,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "electron-updater": "^6.6.2",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -84,8 +95,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "Abyxs",
-      "repo": "DustDesk-Desktop-Manager"
+      "owner": "Xu-qingsong",
+      "repo": "DustDesk-Next"
     }
   }
 }

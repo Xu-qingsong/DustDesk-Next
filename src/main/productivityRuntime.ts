@@ -9,6 +9,7 @@ import { isHttpUrl } from '../shared/urls'
 import { applyProductivityAction, finishFocus } from './productivityState'
 import { assertPathWithinRoot, isWithinDirectory, safeName } from './fileOperations'
 import { isCompleteWorkspace } from './workspaceValidation'
+import { createClipboardAssets } from './clipboardAssets'
 
 interface Dependencies {
   read(): Promise<WorkspaceState>
@@ -16,6 +17,18 @@ interface Dependencies {
   enqueue<T>(operation: () => Promise<T>): Promise<T>
   broadcast(state: WorkspaceState): void
   directory(): string
+}
+
+function validatedNoteAssets(value: unknown) {
+  if (value === undefined) return []
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('备份中的图片集合无效')
+  return Object.entries(value).map(([original, content]) => {
+    if (typeof content !== 'string' || !content || content.length > 16 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(content)) throw new Error('备份中的图片数据无效')
+    const extension = path.extname(original).toLowerCase()
+    if (!['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'].includes(extension)) throw new Error('备份图片格式无效')
+    if (Buffer.from(content, 'base64').toString('base64') !== content) throw new Error('备份中的图片编码无效')
+    return { original, content, extension }
+  })
 }
 
 export function createProductivityRuntime(deps: Dependencies) {
@@ -27,6 +40,7 @@ export function createProductivityRuntime(deps: Dependencies) {
   let lastAutomaticBackupAt = ''
   const scans = new Map<number, { requestId: string; controller: AbortController }>()
   const directory = () => path.join(deps.directory(), 'Backups')
+  const clipboardAssets = createClipboardAssets(deps.directory)
 
   // Caller holds the workspace mutation queue. Managed note images travel with the JSON.
   async function backup(state: WorkspaceState, kind: 'manual' | 'auto' | 'before-restore' = 'manual') {
@@ -49,11 +63,12 @@ export function createProductivityRuntime(deps: Dependencies) {
         warnings.push(`便签「${note.Title}」的背景未能读取，已保留原路径：${target}`)
       }
     }
+    const portable = await clipboardAssets.forBackup(state, kind === 'before-restore' ? warnings : undefined)
     const target = path.join(root, `${kind}-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomUUID()}.json`)
     await assertPathWithinRoot(deps.directory(), target, true)
     const temporary = `${target}.tmp`
     try {
-      await fs.writeFile(temporary, JSON.stringify({ ...state, BackupNoteAssets: assets, BackupWarnings: warnings }), { flag: 'wx' })
+      await fs.writeFile(temporary, JSON.stringify({ ...portable, BackupNoteAssets: assets, BackupWarnings: warnings }), { flag: 'wx' })
       await fs.rename(temporary, target)
     } catch (error) { await fs.rm(temporary, { force: true }).catch(() => undefined); throw error }
     if (kind === 'auto') lastAutomaticBackupAt = new Date().toISOString()
@@ -84,34 +99,41 @@ export function createProductivityRuntime(deps: Dependencies) {
     await assertPathWithinRoot(directory(), target)
     const contents = await fs.readFile(target, 'utf8')
     const raw = JSON.parse(contents) as WorkspaceState
-    if (!isCompleteWorkspace(raw) || Number(raw.SchemaVersion) > 2) throw new Error('备份文件不完整或版本不受支持')
+    if (!isCompleteWorkspace(raw) || Number(raw.SchemaVersion) > 3) throw new Error('备份文件不完整或版本不受支持')
+    validatedNoteAssets(raw.BackupNoteAssets)
     const info = await fs.stat(target)
     return { raw, preview: { path: target, modifiedAt: info.mtime.toISOString(), tasks: raw.Todos.length, notes: raw.Notes.length, projects: raw.Projects.length, links: raw.LinkGroups.reduce((sum, group) => sum + group.Links.length, 0), focusSessions: Array.isArray(raw.FocusSessions) ? raw.FocusSessions.length : 0, recycleEntries: Array.isArray(raw.RecycleBin) ? raw.RecycleBin.length : 0, fingerprint: createHash('sha256').update(contents).digest('hex'), warnings: Array.isArray(raw.BackupWarnings) ? raw.BackupWarnings.filter((item): item is string => typeof item === 'string') : [] } }
   }
 
   async function restoreAssets(state: WorkspaceState) {
-    const assets = state.BackupNoteAssets
-    delete state.BackupWarnings
-    if (!assets || typeof assets !== 'object' || Array.isArray(assets) || Object.keys(assets).length === 0) { delete state.BackupNoteAssets; return }
+    const assets = validatedNoteAssets(state.BackupNoteAssets)
+    const created: string[] = []
+    const rollback = async () => {
+      for (const target of created) await fs.rm(target, { force: true }).catch(() => undefined)
+    }
+    if (!assets.length) { delete state.BackupNoteAssets; delete state.BackupWarnings; return rollback }
     const replacements = new Map<string, string>()
     const root = path.join(deps.directory(), 'NoteBackgrounds')
     await assertPathWithinRoot(deps.directory(), root, true)
     await fs.mkdir(root, { recursive: true })
-    for (const [original, content] of Object.entries(assets)) {
-      if (typeof content !== 'string' || content.length > 16 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(content)) throw new Error('备份中的图片数据无效')
-      const extension = path.extname(original).toLowerCase()
-      if (!['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'].includes(extension)) throw new Error('备份图片格式无效')
-      const destination = path.join(root, `restored-${crypto.randomUUID()}${extension}`)
-      await assertPathWithinRoot(root, destination, true)
-      await fs.writeFile(destination, Buffer.from(content, 'base64'), { flag: 'wx' })
-      replacements.set(original, destination)
-    }
+    try {
+      for (const { original, content, extension } of assets) {
+        const destination = path.join(root, `restored-${crypto.randomUUID()}${extension}`)
+        await assertPathWithinRoot(root, destination, true)
+        const file = await fs.open(destination, 'wx')
+        created.push(destination)
+        try { await file.writeFile(Buffer.from(content, 'base64')) } finally { await file.close() }
+        replacements.set(original, destination)
+      }
+    } catch (error) { await rollback(); throw error }
     const notes = [...state.Notes, ...state.RecycleBin.flatMap(item => item.kind === 'note' ? [item.value] : [])]
     for (const note of notes) if (note.BackgroundImagePath && replacements.has(note.BackgroundImagePath)) {
       note.BackgroundImagePath = replacements.get(note.BackgroundImagePath)!
       note.BackgroundImageFileName = path.basename(note.BackgroundImagePath)
     }
     delete state.BackupNoteAssets
+    delete state.BackupWarnings
+    return rollback
   }
 
   async function maintenance() {

@@ -50,6 +50,7 @@ export interface ClipboardRecord {
   Kind: ClipboardContentKind
   Text: string
   ImagePngBase64: string
+  ImageAssetName?: string
   ImageFileName: string
   ImageSha256: string
   CreatedAt: string
@@ -65,8 +66,8 @@ export interface SystemMetrics {
   TotalMemoryBytes: number
   DownloadBytesPerSecond: number
   UploadBytesPerSecond: number
-  DiskReadBytesPerSecond: number
-  DiskWriteBytesPerSecond: number
+  DiskReadBytesPerSecond: number | null
+  DiskWriteBytesPerSecond: number | null
   DiskSpaces: { DriveName: string; FreeBytes: number; TotalBytes: number }[]
   PingMilliseconds: number
   UptimeSeconds: number
@@ -163,6 +164,17 @@ export interface WorkspaceState extends ProductivityState {
 }
 
 export interface DustDeskApi {
+  selectScreenshotRegion(rect: import('./screenshotDocument').ScreenshotRect, action?: 'edit' | 'copy' | 'save' | 'pin', tool?: import('./screenshotDocument').ScreenshotTool): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
+  createScreenshotDocument(png: Uint8Array): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
+  readScreenshotDocument(id: string): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
+  finishScreenshot(request: import('./screenshotDocument').ScreenshotFinishRequest): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string; pinId?: string; warning?: string }>
+  discardScreenshotDocument(id: string): Promise<void>
+  onScreenshotDocument(callback: (payload: import('./screenshotDocument').ScreenshotPayload) => void): () => void
+  readPinnedScreenshot(id: string, version?: number): Promise<{ ok: boolean; png?: Uint8Array; version?: number; width?: number; height?: number; opacity?: number; topmost?: boolean; locked?: boolean; mouseThrough?: boolean; error?: string }>
+  onPinnedScreenshotSaveRequested(callback: () => void): () => void
+  savePinnedScreenshot(id: string, jpeg: Uint8Array, version: number): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>
+  controlPinnedScreenshot(id: string, action: 'copy' | 'save' | 'edit' | 'close' | 'menu' | 'options' | 'move' | 'resize', value?: { opacity?: number; topmost?: boolean; locked?: boolean; mouseThrough?: boolean; x?: number; y?: number; width?: number; height?: number }): Promise<{ ok: boolean; error?: string }>
+  onPinnedScreenshotChanged(callback: () => void): () => void
   productivity(action: ProductivityAction): Promise<ActionResult>
   backupStatus(): Promise<{ error: string; lastAutomaticBackupAt: string }>
   previewBackup(path: string): Promise<BackupPreview>
@@ -182,6 +194,7 @@ export interface DustDeskApi {
   pickPath(title?: string): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   readImageFile(path: string): Promise<{ ok: boolean; dataUrl?: string; error?: string }>
   openPath(path: string): Promise<{ ok: boolean; error?: string }>
+  getPathIcon(path: string): Promise<{ dataUrl?: string; isDirectory?: boolean }>
   showPathContextMenu(path: string): Promise<{ ok: boolean; error?: string }>
   openUrl(url: string): Promise<{ ok: boolean; error?: string }>
   showMainWindow(): Promise<void>
@@ -189,6 +202,7 @@ export interface DustDeskApi {
   toggleWidgets(key?: string): Promise<{ visible: boolean }>
   getWidgetVisibility(keys: string[]): Promise<Record<string, boolean>>
   hideWidget(key: string): Promise<{ ok: boolean; error?: string }>
+  setWidgetVisibility(key: string, visible: boolean): Promise<{ ok: boolean; visible: boolean; error?: string }>
   setWidgetOptions(key: string, options: { locked?: boolean; topMost?: boolean; transparentBackground?: boolean; autoCollapse?: boolean; collapsed?: boolean; snapToEdges?: boolean; height?: number }): Promise<{ ok: boolean; error?: string }>
   moveWidget(key: string, x: number, y: number, commit?: boolean): Promise<{ ok: boolean; error?: string }>
   resizeWidget(key: string, width: number, height: number, commit?: boolean): Promise<{ ok: boolean; error?: string }>
@@ -205,7 +219,7 @@ export interface DustDeskApi {
   saveScreenshot(dataUrl: string): Promise<{ ok: boolean; path?: string; error?: string }>
   pinScreenshot(dataUrl: string): Promise<{ ok: boolean; error?: string }>
   readClipboard(): Promise<{ text: string; imagePngBase64: string }>
-  writeClipboard(content: { text?: string; imagePngBase64?: string }): Promise<void>
+  writeClipboard(content: { text?: string; imagePngBase64?: string; recordId?: string }): Promise<void>
   onClipboardChanged(callback: (record: ClipboardRecord) => void): () => void
   listDesktopEntries(): Promise<OrganizerEntry[]>
   moveIntoCategory(categoryId: string, sourcePath: string): Promise<{ ok: boolean; path?: string; error?: string }>
@@ -216,15 +230,14 @@ export interface DustDeskApi {
   createBackup(): Promise<{ ok: boolean; path?: string; error?: string }>
   listBackups(): Promise<BackupEntry[]>
   restoreBackup(path?: string, fingerprint?: string): Promise<{ ok: boolean; error?: string }>
-  searchFiles(query: string): Promise<SearchFileResult[]>
+  searchFiles(query: string, requestId?: string): Promise<SearchFileResult[]>
+  cancelFileSearch(requestId: string): Promise<void>
   setHotkeys(keys: { mainWindow?: string; widgets?: string; screenshot?: string; pin?: string; quickCapture?: string }): Promise<{ ok: boolean; error?: string }>
   exportProjects(): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string }>
   planSmartOrganize(): Promise<OrganizerPlanItem[]>
   executeSmartOrganize(plan?: OrganizerPlanItem[]): Promise<{ ok: boolean; moved: number; error?: string }>
   undoOrganizerMove(): Promise<{ ok: boolean; error?: string }>
-  checkForUpdate(): Promise<{ ok: boolean; available: boolean; version?: string; error?: string }>
-  downloadUpdate(): Promise<{ ok: boolean; error?: string }>
-  installUpdate(): Promise<{ ok: boolean; error?: string }>
+  checkForUpdate(): Promise<{ ok: boolean; available: boolean; currentVersion?: string; version?: string; releaseNotes?: string; releaseUrl?: string; message?: string; error?: string }>
   onWorkspaceChanged(callback: (state: WorkspaceState) => void): () => void
   onWidgetVisibilityChanged(callback: (key: string, visible: boolean) => void): () => void
   onWidgetAppearance(callback: (appearance: { color: number; alpha: number }) => void): () => void
