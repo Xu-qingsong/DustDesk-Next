@@ -80,7 +80,7 @@
 2. 按版本规则确定版本，同步包版本、README 和 `docs/releases/v<版本号>.md`。
 3. 执行无窗口检查、相关真实窗口测试；失败必须修复后重试，不将跳过测试写成通过。
 4. 执行 `npm run dist -- --publish never`，生成本版本 Windows x64 NSIS 安装包和便携包。打包时禁止工具自动发布旧目录中的文件。
-5. 执行 `node tests/package-smoke.mjs` 验证打包后的应用启动、preload API 和版本号；`DUSTDESK_PACKAGE_EXECUTABLE` 可指定其他解压后的应用主程序。便携包使用独立测试数据目录启动验证，启动器不直接使用 Playwright Electron 调试连接。为本版本安装包和便携包生成 `SHA256SUMS.txt`。只上传精确匹配本次版本的产物，不上传旧版本或 `win-unpacked`。
+5. 执行 `node tests/package-smoke.mjs` 和 `node tests/portable-smoke.mjs` 验证打包后的应用与便携包启动、preload API、显示版本和小组件；测试使用独立数据目录。`DUSTDESK_PACKAGE_EXECUTABLE` 可指定其他解压后的应用主程序。为本版本安装包和便携包生成 `SHA256SUMS.txt`。只上传精确匹配本次版本的产物，不上传旧版本或 `win-unpacked`。
 6. 审核最终差异，提交代码、开发文档和版本说明，将发布提交推送到主分支。若远程分支有新提交，应先处理差异并重新验证，不强制覆盖远程历史。
 7. 为同一提交创建并推送版本标签；创建草稿 Release，上传并核对附件。Release 正文直接读取已提交的版本说明文件。
 8. 确认附件名称、大小及校验值正确后，将草稿设为正式 Release 和最新版本；核对发布页面、标签提交和下载链接。

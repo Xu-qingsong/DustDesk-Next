@@ -20,6 +20,7 @@ try {
   await page.locator('h1').waitFor()
   assert.equal(await application.evaluate(({ app }) => app.isPackaged), true)
   assert.equal(await application.evaluate(({ app }) => app.getVersion()), expectedVersion)
+  assert.equal(await page.locator('.sidebar .version').textContent(), `v${expectedVersion}`)
   assert.equal(await page.evaluate(() => typeof window.dustdesk.setWidgetVisibility), 'function', 'Packaged preload exposes the current API')
   const state = await page.evaluate(() => window.dustdesk.loadWorkspace())
   assert.equal(state.SchemaVersion, 3)
