@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { ClipboardRecord, DustDeskApi, OrganizerEntry, OrganizerPlanItem, SearchFileResult, SystemMetrics, WorkspaceState } from '../shared/types'
 import type { ResourceScanProgress } from '../shared/productivity'
 
@@ -23,6 +23,29 @@ function trackedInvoke(channel: string, ...args: unknown[]) {
   return operation
 }
 const api: DustDeskApi = {
+  getDroppedPaths: files => files.map(file => webUtils.getPathForFile(file)).filter(Boolean),
+  toolbox: {
+    pick: kind => ipcRenderer.invoke('toolbox:pick', kind),
+    registerPaths: (paths, kind) => ipcRenderer.invoke('toolbox:register-paths', paths, kind),
+    importImage: (bytes, name) => ipcRenderer.invoke('toolbox:import-image', bytes, name),
+    readAsset: id => ipcRenderer.invoke('toolbox:read-asset', id),
+    releaseAssets: ids => ipcRenderer.invoke('toolbox:release-assets', ids),
+    exportText: text => trackedInvoke('toolbox:export-text', text),
+    copyText: text => ipcRenderer.invoke('toolbox:copy-text', text),
+    beginImageExport: (assets, format) => ipcRenderer.invoke('toolbox:begin-image-export', assets, format),
+    exportImage: (batch, name, bytes) => trackedInvoke('toolbox:export-image', batch, name, bytes),
+    endImageExport: batch => trackedInvoke('toolbox:end-image-export', batch),
+    lanSnapshot: () => ipcRenderer.invoke('toolbox:lan-snapshot'),
+    lanEnable: enabled => ipcRenderer.invoke('toolbox:lan-enable', enabled),
+    lanConnect: (address, port) => ipcRenderer.invoke('toolbox:lan-connect', address, port),
+    lanSend: (device, assets, text) => ipcRenderer.invoke('toolbox:lan-send', device, assets, text),
+    lanControl: (id, action) => ipcRenderer.invoke('toolbox:lan-control', id, action),
+    onLanChanged: callback => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: import('../shared/toolbox').LanSnapshot) => callback(snapshot)
+      ipcRenderer.on('toolbox:lan-changed', listener)
+      return () => ipcRenderer.removeListener('toolbox:lan-changed', listener)
+    }
+  },
   productivity: action => trackedInvoke('productivity:action', action),
   backupStatus: () => ipcRenderer.invoke('maintenance:status'),
   previewBackup: target => ipcRenderer.invoke('maintenance:preview', target),
@@ -107,6 +130,7 @@ const api: DustDeskApi = {
   saveScreenshot: (dataUrl: string) => ipcRenderer.invoke('screenshot:save', dataUrl),
   pinScreenshot: (dataUrl: string) => ipcRenderer.invoke('screenshot:pin', dataUrl),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  previewClipboardImage: (recordId, thumbnail = true) => ipcRenderer.invoke('clipboard:preview-image', recordId, thumbnail),
   writeClipboard: (content: { text?: string; imagePngBase64?: string; recordId?: string }) => ipcRenderer.invoke('clipboard:write', content),
   onWorkspaceChanged: (callback: (state: WorkspaceState) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, state: WorkspaceState) => callback(state)

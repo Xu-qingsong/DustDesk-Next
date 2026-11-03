@@ -1,3 +1,4 @@
+import { chooseSelect } from './ui-controls.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
@@ -149,7 +150,10 @@ test('shared editor renders native pixels, previews and edits objects, protects 
     return { pixel: [...c.getContext('2d').getImageData(30, 30, 1, 1).data], width: c.width, height: c.height, annotations: request.document.annotations.length }
   })
   assert.deepEqual(flattened.pixel, [23, 35, 51, 255]); assert.equal(flattened.width, 400); assert.equal(flattened.height, 200)
-  await page.getByLabel('导出格式').selectOption('jpg'); await choose('保存')
+  await page.getByLabel('导出格式').click()
+  await page.keyboard.press('Escape')
+  assert.equal(await page.evaluate(() => window.__canceled), 0, 'Esc closes output options without canceling the screenshot')
+  await chooseSelect(page.getByLabel('导出格式'), 'jpg'); await choose('保存')
   assert.deepEqual(await page.evaluate(() => [...window.__outputs.at(-1).jpeg.slice(0, 2)]), [255, 216], 'JPEG encoding also runs in the worker')
   // Arrow pixels may reach the tip but cannot continue beyond it. Verify the
   // actual flattened PNG across all directions, thick shafts and short arrows.
@@ -159,6 +163,7 @@ test('shared editor renders native pixels, previews and edits objects, protects 
     await choose('箭头'); await page.getByLabel('粗细', { exact: true }).fill(String(width))
     await stroke(200, 100, 200 + Math.cos(angle) * length, 100 + Math.sin(angle) * length)
     await choose('复制')
+    assert.equal(await page.evaluate(() => window.__outputs.at(-1).document.annotations[0].style.width), width, 'Leaving the numeric style field applies it to the first stroke')
     const result = await page.evaluate(async () => {
       const request = window.__outputs.at(-1), annotation = request.document.annotations[0], [start, end] = annotation.points, dx = end.x - start.x, dy = end.y - start.y, length = Math.hypot(dx, dy), bitmap = await createImageBitmap(new Blob([request.png]))
       const c = document.createElement('canvas'); c.width = bitmap.width; c.height = bitmap.height; c.getContext('2d').drawImage(bitmap, 0, 0); bitmap.close()
@@ -396,6 +401,29 @@ test('shared editor renders native pixels, previews and edits objects, protects 
       assert.equal(await penPage.getByRole('alert').count(), 0)
       await penPage.close()
     }
+    // Bottom-edge selections put the entire toolbar above the crop, including
+    // taller tool options. Placement uses DIP coordinates at every tested DPI.
+    await selectionPage.getByRole('button', { name: '调整选区', exact: true }).click()
+    await selectionPage.mouse.move(500, 620); await selectionPage.mouse.down(); await selectionPage.mouse.move(990, 790); await selectionPage.mouse.up()
+    const checkAbove = async () => {
+      await selectionPage.waitForFunction(() => {
+        const tools = document.querySelector('.screenshot-tools').getBoundingClientRect(), selection = document.querySelector('.editor-selection').getBoundingClientRect()
+        return tools.bottom <= selection.top - 26 && tools.top >= 8 && tools.left >= 8 && tools.right <= innerWidth - 8
+      }, undefined, { timeout: 5000 }).catch(async error => {
+        console.error('Toolbar bounds', dpi, await selectionPage.locator('.screenshot-tools, .editor-selection').evaluateAll(nodes => nodes.map(node => ({ class: node.className, box: node.getBoundingClientRect().toJSON() }))))
+        await selectionPage.screenshot({ path: 'test-artifacts/screenshot-toolbar-layout-failure.png' })
+        throw error
+      })
+    }
+    await checkAbove()
+    await selectionPage.getByRole('button', { name: '马赛克', exact: true }).click()
+    await checkAbove()
+    await selectionPage.getByRole('button', { name: '调整选区', exact: true }).click()
+    await selectionPage.mouse.move(100, 100); await selectionPage.mouse.down(); await selectionPage.mouse.move(300, 250); await selectionPage.mouse.up()
+    await selectionPage.waitForFunction(() => {
+      const tools = document.querySelector('.screenshot-tools').getBoundingClientRect(), selection = document.querySelector('.editor-selection').getBoundingClientRect()
+      return tools.top >= selection.bottom + 12 && tools.bottom <= innerHeight - 8
+    })
     await selectionPage.close()
   }
 })

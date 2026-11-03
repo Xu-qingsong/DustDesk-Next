@@ -1,3 +1,4 @@
+import { chooseSelect } from './ui-controls.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
@@ -40,16 +41,25 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort())
   const page = await context.newPage()
   const errors = []
+  const requestedChunks = [], workspaceSaves = [], flushReplies = []
+  let delayedWorkspaceRead
   page.on('pageerror', error => errors.push(error.message))
+  page.on('request', request => { if (request.url().endsWith('.js')) requestedChunks.push(request.url()) })
   const invoke = fixture.client((channel, ...args) => {
     void page.evaluate(({ channel, args }) => window.__dustdeskReceive?.(channel, ...args), { channel, args }).catch(() => {})
   }, true)
-  await page.exposeFunction('__dustdeskInvoke', (channel, args) => {
+  await page.exposeFunction('__dustdeskInvoke', async (channel, args) => {
+    if (channel === 'workspace:save') workspaceSaves.push(args)
     if (channel === 'screenshot:document:create') args[0] = new Uint8Array(Object.values(args[0]))
     if (channel === 'screenshot:finish' && args[0].png) args[0].png = new Uint8Array(Object.values(args[0].png))
     if (channel === 'screenshot:finish' && args[0].jpeg) args[0].jpeg = new Uint8Array(Object.values(args[0].jpeg))
-    return invoke(channel, ...args)
+    const gate = channel === 'workspace:load' ? delayedWorkspaceRead : undefined
+    if (gate) delayedWorkspaceRead = undefined
+    const result = await invoke(channel, ...args)
+    if (gate) { gate.started(result); await gate.wait }
+    return result
   })
+  await page.exposeFunction('__dustdeskSend', (channel, args) => { if (channel === 'workspace:flushed') flushReplies.push(args) })
   const preload = ts.transpileModule(await fs.readFile('src/preload/index.ts', 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
     .replace(/import\s+\{[^}]+\}\s+from\s+['"]electron['"];?/, '')
   await page.addInitScript({ content: `(() => {
@@ -60,13 +70,16 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
       invoke: (channel, ...args) => window.__dustdeskInvoke(channel, args),
       on: (channel, callback) => { const callbacks = listeners.get(channel) || new Set(); callbacks.add(callback); listeners.set(channel, callbacks) },
       removeListener: (channel, callback) => listeners.get(channel)?.delete(callback),
-      send: () => {}
+      send: (channel, ...args) => window.__dustdeskSend(channel, args)
     };
     window.__dustdeskReceive = (channel, ...args) => { for (const callback of listeners.get(channel) || []) callback({}, ...args) };
     ${preload}
   })();` })
   await page.goto(origin)
   await page.locator('h1').waitFor()
+  assert.equal(requestedChunks.some(url => /\/(ImageToolbox|ScreenshotEditor|Settings|Projects)-/.test(url)), false, 'Unused pages and screenshot editing must not load with the overview')
+  const initialScriptSizes = await Promise.all([...new Set(requestedChunks)].map(url => fs.stat(path.join(assets, new URL(url).pathname)).then(info => info.size)))
+  t.diagnostic(`Overview loads ${(initialScriptSizes.reduce((sum, size) => sum + size, 0) / 1000).toFixed(1)} kB of JavaScript before opening other pages`)
   const navigate = name => page.locator('.sidebar').getByText(name, { exact: true }).click()
   const pressed = async (button, value) => {
     await button.waitFor()
@@ -80,14 +93,132 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
       if (await page.evaluate(predicate, argument)) return
       await page.waitForTimeout(30)
     }
-    const diagnostic = await page.evaluate(async () => ({ notes: (await window.dustdesk.loadWorkspace()).Notes.map(note => ({ id: note.Id, title: note.Title })), categories: (await window.dustdesk.loadWorkspace()).DesktopCategories, selections: [...document.querySelectorAll('.organizer-dialog select')].map(item => ({ label: item.getAttribute('aria-label'), value: item.value })), title: document.querySelector('.note-title')?.value, notifications: [...document.querySelectorAll('[data-sonner-toast]')].map(item => item.textContent) }))
+    const diagnostic = await page.evaluate(async () => ({ notes: (await window.dustdesk.loadWorkspace()).Notes.map(note => ({ id: note.Id, title: note.Title, color: note.ColorArgb })), colorInputs: [...document.querySelectorAll('.control-color-popup input')].map(input => ({ label: input.getAttribute('aria-label'), value: input.value })), categories: (await window.dustdesk.loadWorkspace()).DesktopCategories, selections: [...document.querySelectorAll('.organizer-dialog select')].map(item => ({ label: item.getAttribute('aria-label'), value: item.value })), title: document.querySelector('.note-title')?.value, notifications: [...document.querySelectorAll('[data-sonner-toast]')].map(item => item.textContent) }))
     throw Error('Timed out waiting for persisted state: ' + predicate.toString() + '\n' + JSON.stringify(diagnostic))
   }
 
+  const quickNote = page.locator('.quick-note')
+  await quickNote.fill('HEADLESS_QUICK_NOTE_WITHOUT_BLUR')
+  await page.evaluate(() => window.__dustdeskReceive('workspace:flush', 'quick-note-flush'))
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).QuickNote === 'HEADLESS_QUICK_NOTE_WITHOUT_BLUR')
+  await page.waitForFunction(() => document.documentElement.inert)
+  for (let attempt = 0; attempt < 100 && flushReplies.at(-1)?.[0] !== 'quick-note-flush'; attempt++) await page.waitForTimeout(10)
+  assert.deepEqual(flushReplies.at(-1), ['quick-note-flush'], 'Quit must commit the quick note before acknowledging, without requiring blur')
+  await page.evaluate(() => window.__dustdeskReceive('workspace:resume'))
+  await page.evaluate(async () => { const state = await window.dustdesk.loadWorkspace(); await window.dustdesk.saveWorkspace({ ...state, QuickNote: 'QUICK_NOTE_FROM_ANOTHER_WINDOW' }, state) })
+  await page.waitForFunction(() => document.querySelector('.quick-note')?.value === 'QUICK_NOTE_FROM_ANOTHER_WINDOW')
+
+  const overviewTask = page.getByPlaceholder('添加一项任务...')
+  await overviewTask.fill('HEADLESS_IME_OVERVIEW')
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await overviewTask.dispatchEvent('keydown', { key: 'Enter', ...composition })
+    assert.equal(await overviewTask.inputValue(), 'HEADLESS_IME_OVERVIEW')
+    assert.equal((await fixture.load()).Todos.some(todo => todo.Title === 'HEADLESS_IME_OVERVIEW'), false)
+  }
+  await overviewTask.press('Enter')
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Todos.some(todo => todo.Title === 'HEADLESS_IME_OVERVIEW'))
+
   await navigate('便签')
+  const initialSaves = workspaceSaves.length
   await page.getByLabel('便签标题', { exact: true }).fill('HEADLESS_NOTE')
+  await page.locator('.note-text').pressSequentially('abcdefghijkl', { delay: 5 })
+  assert.equal(await page.locator('.note-text').inputValue(), 'abcdefghijkl')
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Title === 'HEADLESS_NOTE' && note.Text === 'abcdefghijkl'))
+  assert.equal(workspaceSaves.length - initialSaves, 1, 'Continuous title and body edits should share one workspace write')
+  await page.locator('.note-text').fill('quit before the debounce expires')
+  await page.evaluate(() => window.__dustdeskReceive('workspace:flush', 'debounced-note-flush'))
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Text === 'quit before the debounce expires'))
+  for (let attempt = 0; attempt < 100 && flushReplies.at(-1)?.[0] !== 'debounced-note-flush'; attempt++) await page.waitForTimeout(10)
+  assert.deepEqual(flushReplies.at(-1), ['debounced-note-flush'], 'Quit must drain delayed saves before acknowledging')
+  await page.evaluate(() => window.__dustdeskReceive('workspace:resume'))
+  const originalWrite = fixture.fileSystem.writeFile
+  let rejectNoteWrites = true
+  fixture.fileSystem.writeFile = async (...args) => {
+    if (rejectNoteWrites && String(args[0]).includes('.electron-tmp-')) throw Error('simulated delayed note write failure')
+    return originalWrite(...args)
+  }
+  await page.locator('.note-text').fill('keep failed delayed edits for retry')
+  await page.getByText('保存失败，修改仍保留在界面中；下次保存或退出时会重试', { exact: true }).waitFor()
+  assert.equal(await page.locator('.note-text').inputValue(), 'keep failed delayed edits for retry')
+  assert.equal((await fixture.load()).Notes[0].Text, 'quit before the debounce expires')
+  await page.evaluate(() => window.__dustdeskReceive('workspace:flush', 'failed-note-flush'))
+  for (let attempt = 0; attempt < 100 && flushReplies.at(-1)?.[0] !== 'failed-note-flush'; attempt++) await page.waitForTimeout(10)
+  assert.match(flushReplies.at(-1)?.[1] ?? '', /simulated delayed note write failure/, 'A failed delayed write must block the quit acknowledgement')
+  rejectNoteWrites = false
+  await page.evaluate(() => window.__dustdeskReceive('workspace:flush', 'retried-note-flush'))
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Text === 'keep failed delayed edits for retry'))
+  for (let attempt = 0; attempt < 100 && flushReplies.at(-1)?.[0] !== 'retried-note-flush'; attempt++) await page.waitForTimeout(10)
+  assert.deepEqual(flushReplies.at(-1), ['retried-note-flush'])
+  fixture.fileSystem.writeFile = originalWrite
+  await page.evaluate(() => window.__dustdeskReceive('workspace:resume'))
   await page.locator('.note-text').fill('Saved without disturbing the desktop')
   await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Title === 'HEADLESS_NOTE' && note.Text === 'Saved without disturbing the desktop'))
+  const originalColor = await page.getByLabel('背景', { exact: true }).locator('.control-color-value').innerText()
+  await page.getByLabel('背景', { exact: true }).click()
+  await page.getByLabel('HEX 颜色', { exact: true }).fill('#123456')
+  await page.getByLabel('HEX 颜色', { exact: true }).press('Enter')
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Title === 'HEADLESS_NOTE' && note.ColorArgb === (0xff123456 | 0)))
+  await page.waitForFunction(() => document.querySelector('[aria-label="R 通道"]')?.value === '18', undefined, { timeout: 5000 })
+  await page.getByLabel('R 通道', { exact: true }).fill('300')
+  await page.getByLabel('R 通道', { exact: true }).press('Tab')
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Title === 'HEADLESS_NOTE' && note.ColorArgb === (0xffff3456 | 0)))
+  await page.getByLabel('HEX 颜色', { exact: true }).fill('badhex')
+  await page.getByLabel('HEX 颜色', { exact: true }).press('Enter')
+  assert.equal(await page.getByLabel('HEX 颜色', { exact: true }).inputValue(), '#ff3456')
+  await page.getByLabel('HEX 颜色', { exact: true }).fill(originalColor)
+  await page.getByLabel('HEX 颜色', { exact: true }).press('Enter')
+  await page.keyboard.press('Escape')
+  // Radix restores focus asynchronously; let it finish before editing another control.
+  await page.waitForFunction(() => document.activeElement?.matches('button[aria-label="背景"]'))
+  const fontSize = page.getByLabel('字号', { exact: true })
+  const originalFont = await fontSize.inputValue()
+  // A widget can update the committed value while this window has an unsubmitted draft.
+  await fontSize.fill('31')
+  await page.evaluate(async () => {
+    const state = await window.dustdesk.loadWorkspace()
+    const next = { ...state, Notes: state.Notes.map(note => note.Title === 'HEADLESS_NOTE' ? { ...note, FontSize: 22 } : note) }
+    await window.dustdesk.saveWorkspace(next, state)
+  })
+  await page.waitForFunction(() => document.querySelector('.note-text')?.style.fontSize === '22px')
+  assert.equal(await fontSize.inputValue(), '31', 'Workspace synchronization must preserve an unsubmitted numeric draft')
+  await fontSize.press('Enter')
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Title === 'HEADLESS_NOTE' && note.FontSize === 31))
+  await fontSize.fill('')
+  assert.equal(await fontSize.inputValue(), '', 'Numbers may be cleared temporarily while editing')
+  await page.evaluate(async () => {
+    const state = await window.dustdesk.loadWorkspace()
+    await window.dustdesk.saveWorkspace({ ...state, Notes: state.Notes.map(note => note.Title === 'HEADLESS_NOTE' ? { ...note, FontSize: 23 } : note) }, state)
+  })
+  await page.waitForFunction(() => document.querySelector('.note-text')?.style.fontSize === '23px')
+  assert.equal(await fontSize.inputValue(), '', 'Synchronization must preserve a temporarily empty numeric draft')
+  await fontSize.press('Tab')
+  assert.equal(await fontSize.inputValue(), '23', 'An empty draft restores the latest committed value on blur')
+  await fontSize.fill('100')
+  await fontSize.press('Tab')
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Title === 'HEADLESS_NOTE' && note.FontSize === 42))
+  await fontSize.fill(originalFont)
+  await fontSize.press('Enter')
+  const flushRenderer = async id => {
+    await page.evaluate(id => window.__dustdeskReceive('workspace:flush', id), id)
+    for (let attempt = 0; attempt < 500 && flushReplies.at(-1)?.[0] !== id; attempt++) await page.waitForTimeout(10)
+    assert.deepEqual(flushReplies.at(-1), [id])
+    await page.evaluate(() => window.__dustdeskReceive('workspace:resume'))
+  }
+  await flushRenderer('before-stale-reload')
+  let readStarted, releaseRead
+  const reading = new Promise(resolve => { readStarted = resolve })
+  delayedWorkspaceRead = { started: readStarted, wait: new Promise(resolve => { releaseRead = resolve }) }
+  t.after(() => releaseRead())
+  await page.locator('.note-text').fill('local edit before delayed reload')
+  const captured = await reading
+  const remoteText = 'newer edit from another window'
+  await fixture.invoke('workspace:save', { ...captured, Notes: captured.Notes.map(note => note.Title === 'HEADLESS_NOTE' ? { ...note, Text: remoteText } : note) }, captured)
+  await page.waitForFunction(text => document.querySelector('.note-text')?.value === text, remoteText, { timeout: 45_000 })
+  releaseRead()
+  await flushRenderer('after-stale-reload')
+  assert.equal(await page.locator('.note-text').inputValue(), remoteText, 'A delayed final reload must not overwrite a newer workspace broadcast')
+  await page.locator('.note-text').fill('Saved without disturbing the desktop')
+  await flushRenderer('restore-after-stale-reload')
   await page.reload()
   await page.locator('h1').waitFor()
   await page.locator('#global-search').fill('HEADLESS_NOTE')
@@ -99,6 +230,33 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   const recycled = page.locator('.feature-row').filter({ hasText: 'HEADLESS_NOTE' })
   await recycled.getByRole('button', { name: '恢复', exact: true }).click()
   await waitForState(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.Title === 'HEADLESS_NOTE'))
+
+  assert.equal(await page.locator('.workspace-chip').count(), 0)
+  const defaultMenu = await page.locator('.nav-list .nav-item > span').allTextContents()
+  for (const label of ['文本工具箱', '图片工具箱', '局域网传输']) assert.ok(!defaultMenu.includes(label))
+  await navigate('设置')
+  await page.locator('.sidebar-menu-row').first().waitFor()
+  assert.equal(await page.locator('.sidebar-menu-row').count(), 16)
+  await page.getByRole('button', { name: '下移：任务', exact: true }).click()
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Settings.SidebarOrder[1] === 'notes')
+  await page.getByRole('switch', { name: '显示菜单：局域网传输', exact: true }).click()
+  await waitForState(async () => !(await window.dustdesk.loadWorkspace()).Settings.SidebarHidden.includes('lan'))
+  await page.reload(); await page.locator('h1').waitFor()
+  assert.equal(await page.locator('.sidebar').getByText('局域网传输', { exact: true }).count(), 1)
+  assert.deepEqual((await page.locator('.nav-list .nav-item > span').allTextContents()).slice(0, 3), ['概览', '便签', '任务'])
+  await navigate('设置')
+  await page.getByRole('button', { name: '拖动排序：概览', exact: true }).dragTo(page.locator('[data-menu-id="projects"]'))
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Settings.SidebarOrder[0] === 'notes')
+  await page.getByRole('switch', { name: '显示菜单：局域网传输', exact: true }).click()
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Settings.SidebarHidden.includes('lan'))
+  await page.evaluate(async () => { const state = await window.dustdesk.loadWorkspace(); await window.dustdesk.saveWorkspace({ ...state, Settings: { ...state.Settings, SidebarHidden: state.Settings.SidebarOrder } }, state) })
+  await page.reload(); await page.getByRole('heading', { name: '设置', exact: true }).waitFor()
+  assert.equal(await page.locator('.nav-list .nav-item').count(), 0)
+  assert.equal(await page.locator('.sidebar-bottom').getByRole('button', { name: '设置', exact: true }).count(), 1)
+  await page.getByRole('button', { name: '恢复默认', exact: true }).click()
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Settings.SidebarHidden.length === 3)
+  assert.deepEqual(await page.locator('.nav-list .nav-item > span').allTextContents(), defaultMenu)
+  await page.screenshot({ path: 'test-artifacts/sidebar-menu-settings.png' })
 
   await navigate('便签')
   await page.locator('.notes-list').getByText('HEADLESS_NOTE', { exact: true }).click()
@@ -122,7 +280,22 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await closePicker()
 
   await page.locator('#global-search').fill('todo HEADLESS_TASK')
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await page.locator('#global-search').dispatchEvent('keydown', { key: 'Enter', ...composition })
+    await page.locator('#global-search').dispatchEvent('keydown', { key: 'Escape', ...composition })
+    assert.equal(await page.locator('#global-search').inputValue(), 'todo HEADLESS_TASK')
+    assert.equal((await fixture.load()).Todos.some(todo => todo.Title === 'HEADLESS_TASK'), false)
+  }
   await page.locator('#global-search').press('Enter')
+  const taskInput = page.getByPlaceholder('添加一个任务，按 Enter 保存')
+  await taskInput.fill('HEADLESS_IME_TASK')
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await taskInput.dispatchEvent('keydown', { key: 'Enter', ...composition })
+    assert.equal(await taskInput.inputValue(), 'HEADLESS_IME_TASK')
+    assert.equal((await fixture.load()).Todos.some(todo => todo.Title === 'HEADLESS_IME_TASK'), false)
+  }
+  await taskInput.press('Enter')
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Todos.some(todo => todo.Title === 'HEADLESS_IME_TASK'))
   const task = page.locator('.todo-row').filter({ hasText: 'HEADLESS_TASK' })
   await task.getByTitle('标记为完成', { exact: true }).click()
   await waitForState(async () => (await window.dustdesk.loadWorkspace()).Todos.some(todo => todo.Title === 'HEADLESS_TASK' && todo.IsCompleted))
@@ -136,8 +309,25 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await phaseDialog.getByRole('button', { name: '添加阶段', exact: true }).click()
   await phaseDialog.waitFor({ state: 'hidden' })
   await page.getByPlaceholder('添加子事项').fill('HEADLESS_SUBTASK')
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await page.getByPlaceholder('添加子事项').dispatchEvent('keydown', { key: 'Enter', ...composition })
+    assert.equal(await page.getByPlaceholder('添加子事项').inputValue(), 'HEADLESS_SUBTASK')
+    assert.equal((await fixture.load()).Projects.some(project => project.Phases.some(phase => phase.Subtasks.some(item => item.Title === 'HEADLESS_SUBTASK'))), false)
+  }
   await page.getByPlaceholder('添加子事项').press('Enter')
   await waitForState(async () => (await window.dustdesk.loadWorkspace()).Projects.some(project => project.Name === 'HEADLESS_PROJECT' && project.Phases.some(phase => phase.Subtasks.some(item => item.Title === 'HEADLESS_SUBTASK'))))
+  await page.getByRole('button', { name: '编辑阶段 HEADLESS_PHASE', exact: true }).click()
+  const nestedPhaseDialog = page.getByRole('dialog', { name: '编辑阶段', exact: true })
+  await nestedPhaseDialog.getByTitle('删除阶段', { exact: true }).click()
+  const confirmation = page.getByRole('alertdialog', { name: '确认删除', exact: true })
+  await confirmation.waitFor()
+  assert.equal(await confirmation.getByRole('button', { name: '取消', exact: true }).evaluate(node => node === document.activeElement), true)
+  await page.keyboard.press('Escape')
+  await confirmation.waitFor({ state: 'hidden' })
+  assert.equal(await nestedPhaseDialog.count(), 1, 'Esc only cancels the nested delete confirmation')
+  await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '删除阶段')
+  await nestedPhaseDialog.getByRole('button', { name: '取消', exact: true }).click()
+  assert.ok((await fixture.load()).Projects.some(project => project.Phases.some(phase => phase.Title === 'HEADLESS_PHASE')))
   const projectKey = `project:${(await fixture.load()).Projects.find(project => project.Name === 'HEADLESS_PROJECT').Id}`
   const projectPin = page.getByRole('button', { name: '固定', exact: true })
   await projectPin.click()
@@ -160,9 +350,16 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await page.getByRole('button', { name: '编辑阶段 HEADLESS_PHASE', exact: true }).click()
   const editPhaseDialog = page.getByRole('dialog', { name: '编辑阶段', exact: true })
   await editPhaseDialog.getByLabel('开始日期', { exact: true }).fill('2026-10-03')
+  await editPhaseDialog.getByRole('button', { name: '选择开始日期', exact: true }).click()
+  await page.screenshot({ path: 'test-artifacts/date-picker-headless.png' })
+  await page.locator('.control-picker-popup').getByRole('button', { name: '2026-10-03', exact: true }).click()
+  await editPhaseDialog.getByRole('button', { name: '选择结束日期', exact: true }).click()
+  assert.equal(await page.locator('.control-picker-popup').getByRole('button', { name: '2026-10-01', exact: true }).isDisabled(), true)
+  await page.keyboard.press('Escape')
+  assert.equal(await editPhaseDialog.count(), 1, 'Esc closes the calendar without closing or submitting the stage dialog')
   await editPhaseDialog.getByLabel('结束日期', { exact: true }).fill('2026-10-07')
   await editPhaseDialog.getByLabel('进度（%）', { exact: true }).fill('50')
-  await editPhaseDialog.getByLabel('状态', { exact: true }).selectOption('Doing')
+  await chooseSelect(editPhaseDialog.getByLabel('状态', { exact: true }), 'Doing')
   await editPhaseDialog.getByRole('button', { name: '保存阶段', exact: true }).click()
   await editPhaseDialog.waitFor({ state: 'hidden' })
   await page.getByRole('group', { name: '时间轴刻度' }).getByRole('button', { name: '日', exact: true }).click()
@@ -225,8 +422,36 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await fixture.invoke('workspace:save', beforeGanttPreview, afterGanttPreview)
   await page.setViewportSize({ width: 1400, height: 900 })
 
+  await navigate('任务')
+  const newTag = page.getByLabel('新增任务标签', { exact: true })
+  await newTag.fill('控件标签')
+  await newTag.press('ArrowDown')
+  await newTag.dispatchEvent('compositionstart')
+  await newTag.press('Enter')
+  assert.equal(await newTag.getAttribute('aria-expanded'), 'true', 'IME confirmation must not select a suggestion')
+  await newTag.dispatchEvent('compositionend')
+  await newTag.press('Enter')
+  assert.equal(await newTag.inputValue(), '控件标签')
+  assert.equal(await newTag.getAttribute('aria-expanded'), 'false')
+  await page.getByTitle('编辑任务', { exact: true }).first().click()
+  await page.getByLabel('编辑任务标签', { exact: true }).fill('新增中文😀标签')
+  await page.getByRole('option', { name: '新增标签「新增中文😀标签」', exact: true }).click()
+  await waitForState(async () => { const state = await window.dustdesk.loadWorkspace(); return state.Todos.some(todo => todo.Tag === '新增中文😀标签') && state.TagPresets.some(tag => tag.Name === '新增中文😀标签') })
+  await page.getByLabel('提醒时间', { exact: true }).fill('2026-02-30 09:30')
+  await page.getByText('请输入有效日期，例如 2026-10-07', { exact: true }).waitFor()
+  await page.getByLabel('提醒时间', { exact: true }).fill('2026-10-07 09:30')
+  await waitForState(async value => (await window.dustdesk.loadWorkspace()).Todos.some(todo => todo.ReminderAt === value), new Date('2026-10-07T09:30').toISOString())
+  await page.getByRole('button', { name: '选择提醒时间', exact: true }).click()
+  await page.getByRole('listbox', { name: '小时', exact: true }).getByRole('option', { name: '10', exact: true }).click()
+  await page.getByRole('listbox', { name: '分钟', exact: true }).getByRole('option', { name: '15', exact: true }).click()
+  await page.locator('.control-picker-popup').getByRole('button', { name: '确定', exact: true }).click()
+  await waitForState(async value => (await window.dustdesk.loadWorkspace()).Todos.some(todo => todo.ReminderAt === value), new Date('2026-10-07T10:15').toISOString())
+  await page.getByRole('button', { name: '选择提醒时间', exact: true }).click()
+  await page.locator('.control-picker-popup').getByRole('button', { name: '清空', exact: true }).click()
+  assert.equal(await page.getByLabel('重复', { exact: true }).isDisabled(), true)
   await navigate('专注计时')
   await page.getByLabel('专注分钟').fill('1.01')
+  await page.getByLabel('专注分钟').press('Tab')
   assert.equal(await page.getByRole('timer').innerText(), '01:01')
   await page.getByRole('button', { name: '开始专注', exact: true }).click()
   await page.getByRole('button', { name: '暂停', exact: true }).click()
@@ -238,6 +463,34 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await navigate('设置')
   assert.equal(await page.getByRole('button', { name: '安装更新', exact: true }).count(), 0)
   assert.equal(await page.getByRole('button', { name: '下载更新', exact: true }).count(), 0)
+  assert.equal(await page.getByRole('heading', { name: '工作区名称', exact: true }).count(), 0)
+  assert.equal(await page.locator('.sidebar-meta').count(), 0)
+  const brandVersion = await page.locator('.brand span').innerText()
+  assert.match(brandVersion, /^v\d+\.\d+\.\d+$/)
+  assert.equal(await page.locator('.settings-current-version strong').innerText(), brandVersion)
+  const anchors = page.getByRole('navigation', { name: '设置锚点导航' })
+  await anchors.getByRole('link', { name: '更新', exact: true }).click()
+  await page.waitForFunction(() => {
+    const target = document.querySelector('#settings-update').getBoundingClientRect(), scroller = document.querySelector('.content').getBoundingClientRect()
+    return target.top >= scroller.top && target.bottom <= scroller.bottom && document.querySelector('.settings-anchor-nav a[aria-current="location"]')?.textContent === '更新'
+  })
+  const navTop = (await anchors.boundingBox()).y
+  assert.ok(navTop >= (await page.locator('.content').boundingBox()).y - 1, `Settings anchors remain inside the visible scrolling area: ${JSON.stringify(await page.evaluate(() => {
+    const nav = document.querySelector('.settings-anchor-nav'), scroller = document.querySelector('.content'), layout = document.querySelector('.settings-layout')
+    return { nav: nav.getBoundingClientRect().toJSON(), scroller: scroller.getBoundingClientRect().toJSON(), layout: layout.getBoundingClientRect().toJSON(), position: getComputedStyle(nav).position }
+  }))}`)
+  await page.locator('.content').evaluate(element => {
+    const target = document.querySelector('#settings-search').getBoundingClientRect()
+    element.scrollTop += target.top - element.getBoundingClientRect().top - 16
+  })
+  await page.waitForFunction(() => document.querySelector('.settings-anchor-nav a[aria-current="location"]')?.textContent === '搜索与工作时间')
+  assert.ok(Math.abs((await anchors.boundingBox()).y - navTop) <= 1, 'Settings anchors stay visible while the settings content scrolls')
+  await page.getByRole('button', { name: '选择工作开始时间', exact: true }).click()
+  await page.getByRole('listbox', { name: '小时', exact: true }).getByRole('option', { name: '09', exact: true }).click()
+  await page.getByRole('listbox', { name: '分钟', exact: true }).getByRole('option', { name: '45', exact: true }).click()
+  await page.locator('.control-picker-popup').getByRole('button', { name: '确定', exact: true }).click()
+  await waitForState(async () => (await window.dustdesk.loadWorkspace()).Settings.WorkdayStartMinutes === 585)
+  await anchors.getByRole('link', { name: '更新', exact: true }).click()
   assert.equal(await page.evaluate(() => document.documentElement.inert), false)
   await page.getByRole('button', { name: '检查更新', exact: true }).click()
   await page.getByText('当前已是最新版本', { exact: true }).waitFor()
@@ -261,6 +514,56 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
     await navigate(name)
     await page.locator('.content-inner').waitFor()
   }
+
+  // Managed clipboard images load thumbnails without rewriting the clipboard.
+  const clipPng = Buffer.from(await page.evaluate(async () => {
+    const canvas = document.createElement('canvas'); canvas.width = 40; canvas.height = 20
+    canvas.getContext('2d').fillRect(0, 0, 40, 20)
+    return [...new Uint8Array(await (await new Promise(resolve => canvas.toBlob(resolve))).arrayBuffer())]
+  }))
+  let clipboardWrites = 0
+  fixture.electron.clipboard.writeText = () => { clipboardWrites++ }
+  fixture.electron.clipboard.writeImage = () => { clipboardWrites++ }
+  fixture.electron.nativeImage.createFromBuffer = bytes => ({ isEmpty: () => false, getSize: () => ({ width: 40, height: 20 }), toPNG: () => bytes, toDataURL: () => `data:image/png;base64,${bytes.toString('base64')}` })
+  const clipText = '第一行内容\n第二行 <script>仅作为文字显示</script>\n最后一行'
+  await page.evaluate(async ({ encoded, text }) => {
+    const state = await window.dustdesk.loadWorkspace()
+    const base = { Text: '', ImagePngBase64: '', ImageSha256: '', CreatedAt: new Date().toISOString(), IsLocked: false, IsPinned: false }
+    await window.dustdesk.saveWorkspace({ ...state, ClipboardHistory: [
+      { ...base, Id: 'clip-preview-image', Kind: 'Image', ImageFileName: '预览测试.png', ImagePngBase64: encoded },
+      { ...base, Id: 'clip-preview-text', Kind: 'Text', ImageFileName: '', Text: text },
+      { ...base, Id: 'clip-preview-missing', Kind: 'Image', ImageFileName: '丢失图片.png', ImageAssetName: '0'.repeat(64) + '.png' }
+    ] }, state)
+  }, { encoded: clipPng.toString('base64'), text: clipText })
+  await navigate('剪贴板')
+  await page.getByAltText('缩略图：预览测试.png', { exact: true }).waitFor()
+  assert.equal(clipboardWrites, 0)
+  await page.getByRole('button', { name: '查看图片：预览测试.png', exact: true }).click()
+  const clipDialog = page.getByRole('dialog', { name: '图片预览', exact: true })
+  await clipDialog.getByAltText('预览测试.png', { exact: true }).waitFor()
+  assert.match(await clipDialog.innerText(), /40 × 20 px/)
+  assert.equal(clipboardWrites, 0)
+  await clipDialog.getByRole('button', { name: '复制图片', exact: true }).click()
+  await page.getByText('已复制到系统剪贴板', { exact: true }).last().waitFor()
+  assert.equal(clipboardWrites, 1)
+  await page.keyboard.press('Escape')
+  await clipDialog.waitFor({ state: 'hidden' })
+  assert.equal(await page.getByRole('button', { name: '查看图片：预览测试.png', exact: true }).evaluate(element => element === document.activeElement), true)
+  await page.locator('[data-clipboard-id="clip-preview-text"]').getByRole('button', { name: /^预览内容/ }).click()
+  assert.equal(await page.locator('.clipboard-text-preview').textContent(), clipText)
+  await page.evaluate(async () => {
+    const state = await window.dustdesk.loadWorkspace()
+    await window.dustdesk.saveWorkspace({ ...state, ClipboardHistory: state.ClipboardHistory.filter(item => item.Id !== 'clip-preview-text') }, state)
+  })
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  await page.getByRole('button', { name: '查看图片：丢失图片.png', exact: true }).click()
+  await page.getByRole('dialog').getByText('图片文件已丢失，无法预览', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '重试预览', exact: true }).click()
+  await page.getByRole('dialog').getByText('图片文件已丢失，无法预览', { exact: true }).waitFor()
+  await page.keyboard.press('Escape')
+  await page.getByPlaceholder('搜索剪贴板历史').fill('没有这个关键词')
+  await page.getByText('没有匹配的记录', { exact: true }).waitFor()
+  await page.getByPlaceholder('搜索剪贴板历史').clear()
 
   // The organizer page keeps rules and management in dialogs and uses file tiles.
   const desktop = path.join(fixture.root, 'desktop')
@@ -356,8 +659,12 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   assert.equal(await fs.readFile((await fixture.load()).DesktopCategories.find(category => category.Id === addedCategory.Id).ItemPaths[0], 'utf8'), '工作报告.txt')
   await page.getByRole('button', { name: '分类管理', exact: true }).click()
   const destinationId = (await fixture.load()).DesktopCategories[0].Id
-  await categoryDialog.getByLabel('当前分类', { exact: true }).selectOption(addedCategory.Id)
-  await categoryDialog.getByLabel('合并目标分类', { exact: true }).selectOption(destinationId)
+  await categoryDialog.getByLabel('当前分类', { exact: true }).click()
+  await page.getByLabel('搜索选项', { exact: true }).fill('HEADLESS_CATEGORY')
+  assert.equal(await page.locator('[data-control-option]:visible').count(), 1)
+  await page.getByLabel('搜索选项', { exact: true }).press('Enter')
+  assert.equal(await categoryDialog.getByLabel('当前分类', { exact: true }).getAttribute('aria-expanded'), 'false')
+  await chooseSelect(categoryDialog.getByLabel('合并目标分类', { exact: true }), destinationId)
   await categoryDialog.getByRole('button', { name: '合并分类', exact: true }).click()
   await waitForState(async () => !(await window.dustdesk.loadWorkspace()).DesktopCategories.some(category => category.Name === 'HEADLESS_CATEGORY'))
   assert.equal((await fixture.load()).DesktopCategories.find(category => category.Id === destinationId).ItemPaths.length, 1)
@@ -366,7 +673,7 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   await waitForState(async id => (await window.dustdesk.loadWorkspace()).DesktopCategories.some(category => category.Id === id && category.ItemPaths.length === 1), addedCategory.Id)
   await page.getByRole('button', { name: '分类管理', exact: true }).click()
-  await categoryDialog.getByLabel('当前分类', { exact: true }).selectOption(addedCategory.Id)
+  await chooseSelect(categoryDialog.getByLabel('当前分类', { exact: true }), addedCategory.Id)
   await categoryDialog.getByRole('button', { name: '删除并恢复', exact: true }).click()
   await waitForState(async id => !(await window.dustdesk.loadWorkspace()).DesktopCategories.some(category => category.Id === id), addedCategory.Id)
   assert.equal(await fs.readFile(path.join(desktop, '工作报告.txt'), 'utf8'), '工作报告.txt')

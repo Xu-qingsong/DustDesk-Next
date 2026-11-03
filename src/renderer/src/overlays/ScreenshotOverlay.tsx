@@ -22,5 +22,5 @@ export function ScreenshotOverlay() {
     return () => { document.documentElement.classList.remove('screenshot-window'); document.documentElement.classList.remove('region-selection-window') }
   }, [])
   if (region) return <RegionSelector />
-  return payload ? <ScreenshotEditor key={payload.document.id} payload={payload} floating initialSelection={selected} directAction={direct} onCancel={() => void window.dustdesk.cancelScreenshotOverlay()} /> : <div className="screenshot-loading" role="status">正在读取屏幕…</div>
+  return payload ? <ScreenshotEditor key={payload.document.id} payload={payload} floating initialSelection={selected} directAction={direct} onCancel={() => void window.dustdesk.cancelScreenshotOverlay()} /> : <div className="screenshot-loading"><div className="screenshot-feedback" role="status">正在读取屏幕…</div></div>
 }

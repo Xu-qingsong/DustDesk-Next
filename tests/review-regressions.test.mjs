@@ -16,7 +16,7 @@ const { assertPathWithinRoot, moveFileSafely } = await import(await sourceModule
 const { createClipboardSampler } = await import(await sourceModuleUrl('../src/main/clipboardSampler.ts'))
 const { retainClipboardHistory } = await import(await sourceModuleUrl('../src/renderer/src/utils/clipboard.ts'))
 const datesUrl = await sourceModuleUrl('../src/renderer/src/utils/dates.ts')
-const { daysUntilPayday, isTodoOverdue } = await import(datesUrl)
+const { daysUntilPayday, isTodoCompletedOnDate, isTodoOnDate, isTodoOverdue, todoScheduledDate } = await import(datesUrl)
 
 async function fixture(run) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dustdesk-file-regression-'))
@@ -135,6 +135,17 @@ test('notified but incomplete tasks remain overdue', () => {
   assert.equal(isTodoOverdue({ ...task, IsCompleted: true }, now), false)
   assert.equal(isTodoOverdue({ ...task, ReminderAt: null }, now), false)
   assert.equal(isTodoOverdue({ ...task, ReminderAt: 'invalid' }, now), false)
+})
+
+test('task dashboard follows reminder days and records completion days', () => {
+  const selected = new Date('2026-10-07T12:00:00')
+  const task = { IsCompleted: false, CreatedAt: '2026-10-01T12:00:00Z', ReminderAt: '2026-10-07T12:00:00Z' }
+  assert.equal(isTodoOnDate(task, selected), true)
+  assert.equal(todoScheduledDate(task).toISOString(), '2026-10-07T12:00:00.000Z')
+  assert.equal(isTodoOnDate({ ...task, ReminderAt: null }, selected), false)
+  assert.equal(isTodoCompletedOnDate({ ...task, IsCompleted: true, CompletedAt: '2026-10-07T12:30:00Z' }, selected), true)
+  assert.equal(isTodoCompletedOnDate({ ...task, IsCompleted: true, CompletedAt: '2026-10-06T12:30:00Z' }, selected), false)
+  assert.equal(isTodoCompletedOnDate({ ...task, IsCompleted: true, CompletedAt: null, CreatedAt: '2026-10-07T08:00:00Z' }, selected), true)
 })
 
 test('unchanged clipboard images are not repeatedly PNG encoded', () => {

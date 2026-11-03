@@ -38,15 +38,17 @@ try {
 
   await navigate('专注计时')
   await app.window.getByLabel('专注分钟').fill('1.01')
+  await app.window.getByLabel('专注分钟').press('Tab')
   assert.equal(await app.window.getByRole('timer').innerText(), '01:01')
   await app.window.getByRole('button', { name: '开始专注', exact: true }).click()
   await until(async () => (await load()).ActiveFocus?.PlannedSeconds === 61, 'fractional focus did not round to seconds')
   await action({ type: 'focus-cancel' })
   await app.window.getByLabel('专注分钟').fill('-1')
-  assert.equal(await app.window.getByRole('timer').innerText(), '00:00')
-  assert.equal(await app.window.getByRole('button', { name: '开始专注', exact: true }).isDisabled(), true)
+  await app.window.getByLabel('专注分钟').press('Tab')
+  assert.equal(await app.window.getByRole('timer').innerText(), '01:00')
+  assert.equal(await app.window.getByLabel('专注分钟').inputValue(), '1', 'The shared control clamps to the permitted range on commit')
   for (const minutes of [NaN, Infinity, -1, 0, 180.1]) assert.equal((await action({ type: 'focus-start', taskId: '', projectId: '', minutes })).ok, false)
-  console.log('Fractional focus preview, actual duration and invalid input passed')
+  console.log('Fractional focus preview, actual duration, bounded input and invalid IPC passed')
 
   const linkResource = { kind: 'link', id: 'ok', parentId: 'test', name: 'Fast link', target: `${url}/ok`, status: 'ok', detail: '' }
   for (const replacement of ['http:example.com', 'https:/example.com', 'www.example.com']) {
@@ -73,7 +75,7 @@ try {
   await navigate('资源检查')
   await app.window.getByRole('button', { name: '开始检查', exact: true }).click()
   await until(() => requests.includes('/slow'), 'slow resource was not requested')
-  await until(async () => Number(await app.window.getByRole('progressbar').getAttribute('value')) >= 1, 'incremental progress missing')
+  await until(async () => Number(await app.window.getByRole('progressbar').getAttribute('aria-valuenow')) >= 1, 'incremental progress missing')
   const cancelledAt = Date.now()
   await app.window.getByRole('button', { name: '取消检查', exact: true }).click()
   await app.window.getByRole('button', { name: '开始检查', exact: true }).waitFor()

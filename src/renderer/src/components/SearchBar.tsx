@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import type React from 'react'
 import type { SearchResult } from '../app/searchNavigation'
+import { isComposingKey } from '../utils/keyboard'
 
 export function SearchBar({ query, setQuery, onKeyDown, results, onSelect }: { query: string; setQuery: (value: string) => void; onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void; results: SearchResult[]; onSelect: (result: SearchResult) => void }) {
   const [activeIndex, setActiveIndex] = useState(-1)
   useEffect(() => { setActiveIndex(-1) }, [query])
   const handleKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isComposingKey(event.nativeEvent)) return
     if (event.key === 'Escape') { setQuery(''); setActiveIndex(-1); return }
     if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && results.length) {
       event.preventDefault()

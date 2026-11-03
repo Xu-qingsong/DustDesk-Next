@@ -4,6 +4,44 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { mainFixture } from './main-headless-harness.mjs'
 
+test('clipboard previews resize managed images, keep original copy data and report missing or corrupted assets', async t => {
+  const fixture = await mainFixture(t)
+  const encoded = Buffer.from('image bytes for preview fixture').toString('base64')
+  const state = await fixture.load()
+  const record = { Id: 'preview-image', Kind: 'Image', Text: '', ImagePngBase64: encoded, ImageFileName: 'preview.png', ImageSha256: 'preview', CreatedAt: new Date().toISOString(), IsLocked: false, IsPinned: false }
+  await fixture.invoke('workspace:save', { ...state, ClipboardHistory: [record, { ...record, Id: 'text', Kind: 'Text', Text: 'text', ImagePngBase64: '' }] }, state)
+  const workspace = await fixture.load()
+  const before = await fs.readFile(path.join(fixture.data, 'workspace.json'), 'utf8')
+  let resized = 0, small = false
+  fixture.electron.clipboard.writeImage = () => { throw Error('Preview must not write the clipboard') }
+  fixture.electron.clipboard.writeText = () => { throw Error('Preview must not write the clipboard') }
+  fixture.electron.nativeImage.createFromBuffer = bytes => {
+    assert.equal(bytes.toString('base64'), encoded)
+    return { isEmpty: () => false, getSize: () => small ? { width: 20, height: 10 } : { width: 640, height: 400 }, toDataURL: () => `data:image/png;base64,${encoded}`, resize: options => {
+      resized++; assert.deepEqual(options, { width: 160, height: 100, quality: 'good' })
+      return { toDataURL: () => 'data:image/png;base64,dGh1bWJuYWls' }
+    } }
+  }
+  const thumbnail = await fixture.invoke('clipboard:preview-image', record.Id, true)
+  assert.equal(thumbnail.ok, true)
+  assert.deepEqual(thumbnail.image, { dataUrl: 'data:image/png;base64,dGh1bWJuYWls', width: 640, height: 400 })
+  const full = await fixture.invoke('clipboard:preview-image', record.Id, false)
+  assert.equal(full.image.dataUrl, `data:image/png;base64,${encoded}`)
+  assert.equal(resized, 1)
+  small = true
+  assert.equal((await fixture.invoke('clipboard:preview-image', record.Id)).image.width, 20)
+  assert.equal(resized, 1, 'Small images are never upscaled')
+  for (const [id, mode] of [['deleted', true], ['text', true], [null, true], [record.Id, 'invalid']]) assert.equal((await fixture.invoke('clipboard:preview-image', id, mode)).ok, false)
+  assert.equal(await fs.readFile(path.join(fixture.data, 'workspace.json'), 'utf8'), before)
+  const asset = path.join(fixture.data, 'ClipboardImages', workspace.ClipboardHistory[0].ImageAssetName)
+  await fs.writeFile(asset, 'corrupted')
+  assert.match((await fixture.invoke('clipboard:preview-image', record.Id)).error, /损坏/)
+  await fs.unlink(asset)
+  assert.match((await fixture.invoke('clipboard:preview-image', record.Id)).error, /丢失/)
+  await fs.writeFile(asset, Buffer.from(encoded, 'base64'))
+  assert.equal((await fixture.invoke('clipboard:preview-image', record.Id)).ok, true)
+})
+
 test('file icons use native icons and retain folder fallback when extraction fails', async t => {
   const fixture = await mainFixture(t)
   const folder = path.join(fixture.root, 'example-folder')

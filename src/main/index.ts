@@ -4,7 +4,7 @@ import { collectDeleted, normalizeProductivity, matchOrganizerRule } from './pro
 import { createProductivityRuntime } from './productivityRuntime'
 import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, screen, shell, Tray } from 'electron'
 import { createHash } from 'node:crypto'
-import { existsSync, promises as fs } from 'node:fs'
+import { existsSync, readFileSync, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,15 +24,25 @@ import { snapWidgetBounds } from './widgetSnapping'
 import { createWindowsIconReader } from './windowsIcons'
 import { createIconLoader } from '../shared/iconLoader'
 import { createScreenshotSessions } from './screenshotSessions'
+import { createToolboxRuntime } from './toolboxRuntime'
+import { normalizeSidebarPreferences, sidebarDefaultHidden } from '../shared/sidebar'
 import { captureWindowsRegion } from './regionCapture'
 import type { ScreenshotRect, ScreenshotTool } from '../shared/screenshotDocument'
 import type { ScreenshotDocument, ScreenshotFinishRequest, ScreenshotPayload } from '../shared/screenshotDocument'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const packageVersion = (() => {
+  try {
+    const raw = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8')) as { version?: unknown }
+    return typeof raw.version === 'string' && /^\d+\.\d+\.\d+(?:-[\da-zA-Z.-]+)?$/.test(raw.version) ? raw.version : undefined
+  } catch { return undefined }
+})()
+const applicationVersion = () => packageVersion ?? app.getVersion()
 if (process.env.DUSTDESK_TEST_USER_DATA_DIR) app.setPath('userData', path.resolve(process.env.DUSTDESK_TEST_USER_DATA_DIR))
 let mainWindow: BrowserWindow | null = null
+const toolboxRuntime = createToolboxRuntime(() => mainWindow)
 const releaseUpdates = createReleaseUpdateChecker({
-  version: () => app.getVersion(),
+  version: applicationVersion,
   request: (input, init) => net.fetch(input, init),
   confirm: async (version, currentVersion, notes) => {
     const options: Electron.MessageBoxOptions = {
@@ -87,6 +97,9 @@ let clipboardMonitoringEnabled = true
 let reminderTimer: NodeJS.Timeout | null = null
 type OrganizerUndoAction = { source: string; target: string; categoryId: string; sourceCategoryId?: string; sourceCategory?: DesktopCategoryRecord }
 const organizerUndoStack: OrganizerUndoAction[] = []
+type OrganizerDesktopRestore = { source: string; target: string; categoryId: string; ino: number; birthtimeMs: number }
+// Main-process owned journal: persisted before moving anything out of storage.
+let organizerDesktopRestores: OrganizerDesktopRestore[] | null = null
 let workspaceWriteQueue: Promise<string> = Promise.resolve('')
 let workspaceMutationQueue: Promise<void> = Promise.resolve()
 let defaultStateInitialization: Promise<WorkspaceState> | null = null
@@ -216,11 +229,14 @@ function normalizeState(value: unknown): WorkspaceState | null {
     if ((typeof expected === 'number' && typeof candidate === 'number' && Number.isFinite(candidate)) || (typeof expected === 'string' && typeof candidate === 'string') || (typeof expected === 'boolean' && typeof candidate === 'boolean')) normalizedSettings[key] = candidate as never
   }
   const normalized = { ...base, ...value, Settings: normalizedSettings } as WorkspaceState
+  const sidebar = normalizeSidebarPreferences(settings)
+  normalized.Settings.SidebarOrder = sidebar.order
+  normalized.Settings.SidebarHidden = sidebar.hidden
   normalized.SchemaVersion = 3
   normalized.LegacyImportCompleted = value.LegacyImportCompleted === true
   normalized.QuickNote = typeof value.QuickNote === 'string' ? value.QuickNote : ''
   const records = (key: string) => Array.isArray(value[key]) ? value[key].filter(isRecord) : []
-  normalized.Todos = records('Todos').map(item => ({ ...item, Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Title: typeof item.Title === 'string' ? item.Title : '', Tag: typeof item.Tag === 'string' ? item.Tag : '', Note: typeof item.Note === 'string' ? item.Note : '', IsCompleted: item.IsCompleted === true, CreatedAt: typeof item.CreatedAt === 'string' ? item.CreatedAt : new Date().toISOString(), ReminderAt: typeof item.ReminderAt === 'string' ? item.ReminderAt : null, ReminderNotifiedAt: typeof item.ReminderNotifiedAt === 'string' ? item.ReminderNotifiedAt : null, ReminderRepeat: ['None', 'Daily', 'Weekdays', 'Weekly'].includes(String(item.ReminderRepeat)) ? item.ReminderRepeat as WorkspaceState['Todos'][number]['ReminderRepeat'] : 'None' }))
+  normalized.Todos = records('Todos').map(item => ({ ...item, Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Title: typeof item.Title === 'string' ? item.Title : '', Tag: typeof item.Tag === 'string' ? item.Tag : '', Note: typeof item.Note === 'string' ? item.Note : '', IsCompleted: item.IsCompleted === true, CreatedAt: typeof item.CreatedAt === 'string' ? item.CreatedAt : new Date().toISOString(), CompletedAt: typeof item.CompletedAt === 'string' ? item.CompletedAt : null, ReminderAt: typeof item.ReminderAt === 'string' ? item.ReminderAt : null, ReminderNotifiedAt: typeof item.ReminderNotifiedAt === 'string' ? item.ReminderNotifiedAt : null, ReminderRepeat: ['None', 'Daily', 'Weekdays', 'Weekly'].includes(String(item.ReminderRepeat)) ? item.ReminderRepeat as WorkspaceState['Todos'][number]['ReminderRepeat'] : 'None' }))
   normalized.TagPresets = records('TagPresets').map(item => ({ Name: typeof item.Name === 'string' ? item.Name : '', ColorArgb: typeof item.ColorArgb === 'number' && Number.isFinite(item.ColorArgb) ? item.ColorArgb : -1576078 })).filter(item => item.Name)
   normalized.Notes = records('Notes').map(item => ({ ...item, Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Title: typeof item.Title === 'string' ? item.Title : '', Text: typeof item.Text === 'string' ? item.Text : '', ColorArgb: typeof item.ColorArgb === 'number' ? item.ColorArgb : -411768, FontColorArgb: typeof item.FontColorArgb === 'number' ? item.FontColorArgb : -1385444, FontSize: typeof item.FontSize === 'number' && Number.isFinite(item.FontSize) ? item.FontSize : 14, FontBold: item.FontBold === true, BackgroundImagePath: typeof item.BackgroundImagePath === 'string' ? item.BackgroundImagePath : null, BackgroundImageFileName: typeof item.BackgroundImageFileName === 'string' ? item.BackgroundImageFileName : '', ImageOnly: item.ImageOnly === true, CreatedAt: typeof item.CreatedAt === 'string' ? item.CreatedAt : new Date().toISOString(), UpdatedAt: typeof item.UpdatedAt === 'string' ? item.UpdatedAt : new Date().toISOString() }))
   normalized.Projects = records('Projects').map(item => ({ Id: typeof item.Id === 'string' ? item.Id : crypto.randomUUID(), Name: typeof item.Name === 'string' ? item.Name : '', ProjectPath: typeof item.ProjectPath === 'string' ? item.ProjectPath : '', Phases: Array.isArray(item.Phases) ? item.Phases.filter(isRecord).map(phase => ({ Id: typeof phase.Id === 'string' ? phase.Id : crypto.randomUUID(), Title: typeof phase.Title === 'string' ? phase.Title : '', Status: ['Todo', 'Doing', 'Done'].includes(String(phase.Status)) ? phase.Status as 'Todo' | 'Doing' | 'Done' : 'Todo', StartDate: typeof phase.StartDate === 'string' ? phase.StartDate : null, EndDate: typeof phase.EndDate === 'string' ? phase.EndDate : null, ProgressPercent: typeof phase.ProgressPercent === 'number' && Number.isFinite(phase.ProgressPercent) ? phase.ProgressPercent : 0, ProjectPath: typeof phase.ProjectPath === 'string' ? phase.ProjectPath : '', Subtasks: Array.isArray(phase.Subtasks) ? phase.Subtasks.filter(isRecord).map(subtask => ({ Id: typeof subtask.Id === 'string' ? subtask.Id : crypto.randomUUID(), Title: typeof subtask.Title === 'string' ? subtask.Title : '', IsCompleted: subtask.IsCompleted === true, FilePath: typeof subtask.FilePath === 'string' ? subtask.FilePath : '' })) : [] })) : [] }))
@@ -261,6 +277,7 @@ function defaultState(): WorkspaceState {
     Settings: {
       ...productivitySettings,
       MainWindowDisplayName: 'DustDesk', StartHiddenToTray: false, StartWithWindows: false,
+      SidebarHidden: [...sidebarDefaultHidden],
       MainWindowHotKey: 'Ctrl+Shift+K', DesktopWidgetsHotKey: 'Ctrl+Shift+D', ScreenshotHotKey: 'Ctrl+Shift+S', PinScreenshotHotKey: 'F3',
       ScreenshotFormat: 'png', ScreenshotSaveDirectory: '', ScreenshotDelaySeconds: 0, ScreenshotAfterAction: 'edit', ScreenshotAutoCopy: true,
       ScreenshotAutoAddToClipboardHistory: true, PinnedImageTopmost: true, PinnedImageOpacityPercent: 100, PinnedImageMouseThrough: false,
@@ -273,8 +290,8 @@ function defaultState(): WorkspaceState {
       CountdownFestivalDay: 1, WidgetPlacements: {}, NoteWidgetPlacements: [], OrganizerGroupWidgetPlacements: [], WidgetLayoutPresets: {}
     },
     Todos: [
-      { Id: crypto.randomUUID(), Title: '梳理今天最重要的一件事', Tag: '工作', Note: '', IsCompleted: false, CreatedAt: now, ReminderRepeat: 'None' },
-      { Id: crypto.randomUUID(), Title: '把临时想法记到快速记录', Tag: '', Note: '', IsCompleted: false, CreatedAt: now, ReminderRepeat: 'None' }
+      { Id: crypto.randomUUID(), Title: '梳理今天最重要的一件事', Tag: '工作', Note: '', IsCompleted: false, CreatedAt: now, CompletedAt: null, ReminderRepeat: 'None' },
+      { Id: crypto.randomUUID(), Title: '把临时想法记到快速记录', Tag: '', Note: '', IsCompleted: false, CreatedAt: now, CompletedAt: null, ReminderRepeat: 'None' }
     ], TagPresets: [{ Name: '工作', ColorArgb: -1576078 }, { Name: '生活', ColorArgb: -1427458 }, { Name: '重要', ColorArgb: -4045013 }],
     Notes: [{ Id: crypto.randomUUID(), Title: '快速便签', Text: '', ColorArgb: -411768, FontColorArgb: -1385444, FontSize: 14, FontBold: false, BackgroundImageFileName: '', ImageOnly: false, CreatedAt: now, UpdatedAt: now }],
     Projects: [], Launchers: [], LinkGroups: [{ Id: crypto.randomUUID(), Name: '常用', Links: [] }], ClipboardHistory: [],
@@ -346,6 +363,7 @@ async function writeState(state: WorkspaceState, backupCurrent = true) {
     if (!normalized || !isCompleteWorkspace(normalized)) throw new Error('工作区数据结构无效')
     await clipboardAssets.externalize(normalized)
     ;(normalized as WorkspaceState & { OrganizerUndoStack?: OrganizerUndoAction[] }).OrganizerUndoStack = organizerUndoStack.slice(-100)
+    if (organizerDesktopRestores !== null) (normalized as WorkspaceState & { OrganizerDesktopRestores?: OrganizerDesktopRestore[] }).OrganizerDesktopRestores = organizerDesktopRestores
     const directory = dataDirectory()
     await fs.mkdir(directory, { recursive: true })
     const temporary = `${dataPath()}.electron-tmp-${process.pid}-${crypto.randomUUID()}`
@@ -491,6 +509,91 @@ async function logOrganizerFailure(operation: string, source: string, target: st
     await fs.mkdir(logDirectory, { recursive: true })
     await fs.appendFile(path.join(logDirectory, 'organizer-move.log'), `${new Date().toISOString()} [${operation}] ${source} -> ${target}\n${error instanceof Error ? error.stack ?? error.message : String(error)}\n\n`, 'utf8')
   } catch { /* logging must not hide the original organizer error */ }
+}
+
+function loadOrganizerDesktopRestores(state: WorkspaceState) {
+  if (organizerDesktopRestores !== null) return
+  const persisted = (state as WorkspaceState & { OrganizerDesktopRestores?: OrganizerDesktopRestore[] }).OrganizerDesktopRestores
+  organizerDesktopRestores = Array.isArray(persisted) ? persisted.filter(item => item && typeof item.source === 'string' && typeof item.target === 'string' && typeof item.categoryId === 'string' && Number.isFinite(item.ino) && Number.isFinite(item.birthtimeMs)) : []
+}
+
+function validOrganizerDesktopRestore(item: OrganizerDesktopRestore, state: WorkspaceState) {
+  const root = path.join(dataDirectory(), 'DesktopOrganizer')
+  return path.dirname(path.dirname(path.resolve(item.source))).toLowerCase() === path.resolve(root).toLowerCase()
+    && path.dirname(path.resolve(item.target)).toLowerCase() === path.resolve(desktopDirectory()).toLowerCase()
+    && state.DesktopCategories.some(category => category.Id === item.categoryId && category.ItemPaths.includes(item.source))
+}
+
+async function resumeOrganizerSession() {
+  return enqueueWorkspaceOperation(async () => {
+    const state = await readState()
+    loadOrganizerDesktopRestores(state)
+    if (!organizerDesktopRestores!.length) return state
+    const pending: OrganizerDesktopRestore[] = []
+    for (const item of organizerDesktopRestores!) {
+      if (!validOrganizerDesktopRestore(item, state)) continue
+      try {
+        // If the move never happened (or startup already completed it), leave any
+        // unrelated desktop namesake alone. Never recollect a replacement file.
+        if (pathExists(item.source) || !pathExists(item.target)) continue
+        const info = await fs.lstat(item.target)
+        if (info.ino !== item.ino || info.birthtimeMs !== item.birthtimeMs) continue
+        await moveWithVerification(item.target, item.source)
+      } catch (error) {
+        pending.push(item)
+        await logOrganizerFailure('启动恢复收纳', item.target, item.source, error)
+      }
+    }
+    organizerDesktopRestores = pending
+    await writeState(state)
+    if (pending.length) throw new Error('部分桌面项目暂时无法重新收纳，已保留在桌面。请解除占用或检查权限后重新启动 DustDesk。')
+    return state
+  })
+}
+
+async function restoreOrganizerForQuit() {
+  await enqueueWorkspaceOperation(async () => {
+    const state = await readState()
+    loadOrganizerDesktopRestores(state)
+    const root = path.join(dataDirectory(), 'DesktopOrganizer')
+    const reserved = new Set<string>()
+    const sources = new Set<string>()
+    const restores: OrganizerDesktopRestore[] = []
+    for (const category of state.DesktopCategories) for (const source of category.ItemPaths) {
+      if (path.dirname(path.dirname(path.resolve(source))).toLowerCase() !== path.resolve(root).toLowerCase() || !pathExists(source)) continue
+      if (sources.has(path.resolve(source).toLowerCase())) continue
+      sources.add(path.resolve(source).toLowerCase())
+      await assertPathWithinRoot(dataDirectory(), source)
+      const info = await fs.lstat(source)
+      const name = path.basename(source)
+      const extension = info.isDirectory() ? '' : path.extname(name)
+      const stem = name.slice(0, name.length - extension.length)
+      let target = path.join(desktopDirectory(), name)
+      for (let index = 1; pathExists(target) || reserved.has(target.toLowerCase()); index++) target = path.join(desktopDirectory(), `${stem} (${index})${extension}`)
+      reserved.add(target.toLowerCase())
+      restores.push({ source, target, categoryId: category.Id, ino: info.ino, birthtimeMs: info.birthtimeMs })
+    }
+    organizerDesktopRestores = [...organizerDesktopRestores!.filter(item => validOrganizerDesktopRestore(item, state) && !pathExists(item.source)), ...restores]
+    if (!organizerDesktopRestores.length) return
+    // Keep category paths and undo history pointing at storage, and journal the
+    // temporary desktop location so a restart can restore the same classification.
+    await writeState(state)
+    const failures: string[] = []
+    for (const item of restores) {
+      try {
+        await moveWithVerification(item.source, item.target)
+        // Cross-volume copies have a new file identity at the destination.
+        const info = await fs.lstat(item.target)
+        item.ino = info.ino; item.birthtimeMs = info.birthtimeMs
+      }
+      catch (error) {
+        failures.push(path.basename(item.source))
+        await logOrganizerFailure('退出恢复桌面', item.source, item.target, error)
+      }
+    }
+    await writeState(state)
+    if (failures.length) throw new Error(`以下项目未能恢复到桌面，退出已取消，请解除占用或检查权限后重试：${failures.join('、')}`)
+  })
 }
 
 function classifyOrganizerEntry(name: string, categories: WorkspaceState['DesktopCategories']) {
@@ -803,6 +906,10 @@ function createTray() {
 }
 
 function createApplicationMenu() {
+  if (app.isPackaged) {
+    Menu.setApplicationMenu(null)
+    return
+  }
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: '文件',
@@ -848,7 +955,7 @@ function createApplicationMenu() {
     {
       label: '帮助',
       submenu: [
-        { label: '关于 DustDesk', click: () => { void dialog.showMessageBox({ type: 'info', title: '关于 DustDesk', message: 'DustDesk', detail: `本地桌面工作台\n版本 ${app.getVersion()} · Electron\n${repository.url}` }) } },
+        { label: '关于 DustDesk', click: () => { void dialog.showMessageBox({ type: 'info', title: '关于 DustDesk', message: 'DustDesk', detail: `本地桌面工作台\n版本 ${applicationVersion()} · Electron\n${repository.url}` }) } },
         { label: '项目主页', click: () => { void shell.openExternal(repository.url) } },
         { label: '问题反馈', click: () => { void shell.openExternal(repository.issues) } }
       ]
@@ -1135,6 +1242,7 @@ async function collectSystemMetrics(): Promise<SystemMetrics> {
 }
 
 function registerIpc() {
+  toolboxRuntime.register()
   ipcMain.handle('workspace:load', async event => {
     const state = await readState()
     if (!workspaceClientSnapshots.has(event.sender.id)) event.sender.once('destroyed', () => { workspaceClientSnapshots.delete(event.sender.id) })
@@ -1313,6 +1421,24 @@ function registerIpc() {
   ipcMain.handle('path:context-menu', async (event, target: string) => { try { if (typeof target !== 'string' || target.length > 4096) throw new Error('路径无效'); const sender = BrowserWindow.fromWebContents(event.sender); if (!sender) throw new Error('窗口不可用'); const menu = Menu.buildFromTemplate([{ label: '打开', click: () => { void shell.openPath(target) } }, { label: '在资源管理器中显示', click: () => shell.showItemInFolder(target) }, { label: '复制路径', click: () => clipboard.writeText(target) }]); menu.popup({ window: sender }); return { ok: true } } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })
   ipcMain.handle('url:open', async (_event, target: string) => { try { const value = target.trim(); if (!isHttpUrl(value)) throw new Error('只允许打开 HTTP/HTTPS 链接'); await shell.openExternal(value); return { ok: true } } catch (error) { return { ok: false, error: String(error) } } })
   ipcMain.handle('clipboard:read', () => ({ text: clipboard.readText(), imagePngBase64: clipboard.readImage().isEmpty() ? '' : clipboard.readImage().toPNG().toString('base64') }))
+  ipcMain.handle('clipboard:preview-image', async (_event, recordId: string, thumbnail = true) => {
+    try {
+      if (typeof recordId !== 'string' || !recordId || recordId.length > 128 || typeof thumbnail !== 'boolean') throw new Error('剪贴板图片请求无效')
+      const item = (await readState()).ClipboardHistory.find(item => item.Id === recordId && item.Kind === 'Image')
+      if (!item) throw new Error('图片记录已删除或不存在')
+      const encoded = await clipboardAssets.read(item)
+      if (encoded.length > Math.ceil(maxImageBytes * 4 / 3)) throw new Error('剪贴板图片过大')
+      const image = nativeImage.createFromBuffer(Buffer.from(encoded, 'base64'))
+      const { width, height } = image.getSize()
+      if (image.isEmpty() || width <= 0 || height <= 0 || width * height > 40_000_000) throw new Error('图片无效或尺寸过大，无法预览')
+      const scale = thumbnail ? Math.min(1, 160 / width, 120 / height) : 1
+      const preview = scale < 1 ? image.resize({ width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)), quality: 'good' }) : image
+      return { ok: true, image: { dataUrl: preview.toDataURL(), width, height } }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      return { ok: false, error: code === 'ENOENT' ? '图片文件已丢失，无法预览' : code === 'EACCES' || code === 'EPERM' ? '无法读取图片，请检查文件权限后重试' : error instanceof Error ? error.message : '图片预览失败，请重试' }
+    }
+  })
   ipcMain.handle('clipboard:write', async (_event, content: { text?: string; imagePngBase64?: string; recordId?: string }) => {
     if (content?.recordId !== undefined) {
       const item = (await readState()).ClipboardHistory.find(item => item.Id === content.recordId)
@@ -1660,16 +1786,24 @@ function registerIpc() {
   ipcMain.handle('update:check', () => releaseUpdates.check())
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!singleInstanceLock) return
   if (process.platform === 'win32') app.setAppUserModelId('com.dustdesk.next')
+  try {
+    const state = await readState()
+    const persisted = (state as WorkspaceState & { OrganizerUndoStack?: OrganizerUndoAction[] }).OrganizerUndoStack
+    if (Array.isArray(persisted)) organizerUndoStack.push(...persisted.filter(item => item && typeof item.source === 'string' && typeof item.target === 'string' && typeof item.categoryId === 'string').slice(-100))
+    await resumeOrganizerSession()
+  } catch (error) {
+    console.error('恢复桌面收纳失败', error)
+    dialog.showErrorBox('恢复桌面收纳失败', error instanceof Error ? error.message : String(error))
+  }
   registerIpc(); void productivity.start().catch(error => console.error(error)); createApplicationMenu(); createWindow(); createTray(); startClipboardMonitor()
+  void toolboxRuntime.restore().catch(error => console.error('局域网服务启动失败', error))
   reminderTimer = setInterval(() => { void checkTodoReminders().catch(() => undefined) }, 30_000)
   void checkTodoReminders().catch(() => undefined)
   void readState().then(state => {
     clipboardMonitoringEnabled = state.Settings.ClipboardMonitoringEnabled !== false
-    const persisted = (state as WorkspaceState & { OrganizerUndoStack?: OrganizerUndoAction[] }).OrganizerUndoStack
-    if (Array.isArray(persisted)) organizerUndoStack.push(...persisted.filter(item => item && typeof item.source === 'string' && typeof item.target === 'string' && typeof item.categoryId === 'string').slice(-100))
     if (!launchedHidden && !state.Settings.StartHiddenToTray) showWindow()
     else mainWindow?.hide()
     restoreVisibleWidgets(state)
@@ -1707,7 +1841,23 @@ async function prepareToQuit() {
     mutations = workspaceMutationQueue; writes = workspaceWriteQueue
     await Promise.all([mutations, writes])
   } while (mutations !== workspaceMutationQueue || writes !== workspaceWriteQueue)
+  const state = await readState()
+  const organizerRoot = path.resolve(path.join(dataDirectory(), 'DesktopOrganizer')).toLowerCase()
+  const hasOrganizedItems = state.DesktopCategories.some(category => category.ItemPaths.some(source => path.dirname(path.dirname(path.resolve(source))).toLowerCase() === organizerRoot && pathExists(source)))
+  if (hasOrganizedItems) {
+    const options: Electron.MessageBoxOptions = {
+      type: 'question', title: '退出 DustDesk',
+      message: '退出前，是否将已收纳的文件和文件夹恢复到桌面？',
+      detail: '恢复到桌面后，下次启动会按原分类重新收纳。保留收纳时，文件继续保存在收纳分类中，可在应用中恢复到桌面。',
+      buttons: ['恢复并退出', '保留收纳并退出', '取消'], defaultId: 2, cancelId: 2, noLink: true
+    }
+    const { response } = await (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options))
+    if (response !== 0 && response !== 1) return false
+    if (response === 0) await restoreOrganizerForQuit()
+  }
   await productivity.stop()
+  await toolboxRuntime.dispose()
+  return true
 }
 
 function resumeAfterQuitFailure() {
@@ -1716,14 +1866,18 @@ function resumeAfterQuitFailure() {
 }
 
 app.on('before-quit', event => {
-  if (readyToQuit) return
+  if (!singleInstanceLock || readyToQuit) return
   event.preventDefault()
   if (waitingForQuit) return
   waitingForQuit = true
-  void prepareToQuit().then(() => {
+  void prepareToQuit().then(proceed => {
+    if (!proceed) { resumeAfterQuitFailure(); return }
     isQuitting = true; readyToQuit = true
     app.quit()
-  }).catch(error => {
+  }).catch(async error => {
+    // A cancelled quit leaves the app running; put successfully restored items
+    // back before resuming editors so their category paths remain usable.
+    await resumeOrganizerSession().catch(resumeError => console.error('恢复桌面收纳失败', resumeError))
     resumeAfterQuitFailure()
     dialog.showErrorBox('尚未完成保存', error instanceof Error ? error.message : String(error))
   })

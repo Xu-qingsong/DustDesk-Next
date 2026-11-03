@@ -1,6 +1,6 @@
 {
   "name": "dustdesk-electron",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "author": "DustDesk",
   "description": "DustDesk local desktop workspace, rebuilt with Electron.",
@@ -19,8 +19,10 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "node --test tests/**/*.test.mjs",
-    "check:silent": "npm run typecheck && npm test && npm run build && node --test --test-concurrency=1 tests/renderer-headless.mjs tests/screenshot-headless.mjs",
+    "check:silent": "npm run typecheck && npm test && npm run build && node --test --test-concurrency=1 tests/renderer-headless.mjs tests/screenshot-headless.mjs tests/toolbox-headless.mjs",
     "test:screenshot:silent": "npm run build && node --test tests/screenshot-document.test.mjs tests/screenshot-main.test.mjs tests/screenshot-headless.mjs",
+    "test:toolbox:silent": "npm run build && node --test tests/toolbox.test.mjs tests/toolbox-headless.mjs",
+    "e2e:toolbox": "npm run build && node tests/image-toolbox-regressions.mjs && node tests/toolbox-native.mjs && node tests/toolbox-workflows.mjs",
     "test:renderer:silent": "npm run build && node --test tests/renderer-headless.mjs",
     "e2e": "npm run build && node tests/e2e-smoke.mjs",
     "e2e:widgets": "npm run build && node tests/widget-restart.mjs",
@@ -41,7 +43,9 @@
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-dropdown-menu": "^2.1.15",
+    "@radix-ui/react-popover": "^1.2.0",
     "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-select": "^2.3.8",
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tooltip": "^1.2.8",
     "class-variance-authority": "^0.7.1",
@@ -49,23 +53,28 @@
     "cmdk": "^1.1.1",
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
+    "react-day-picker": "^10.0.2",
     "react-dom": "^19.1.1",
+    "selfsigned": "^3.0.1",
     "sonner": "^2.0.7",
     "systeminformation": "^5.33.1",
     "tailwind-merge": "^3.3.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
+    "@types/yazl": "^3.3.1",
     "@vitejs/plugin-react": "^5.0.2",
     "electron": "^37.3.1",
     "electron-builder": "^26.0.12",
     "electron-vite": "^4.0.0",
     "playwright": "^1.62.1",
     "typescript": "^5.9.2",
-    "vite": "^7.1.3"
+    "vite": "^7.1.3",
+    "yauzl": "^3.4.0"
   },
   "build": {
     "appId": "com.dustdesk.next",

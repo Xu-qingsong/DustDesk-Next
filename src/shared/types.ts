@@ -10,6 +10,7 @@ export interface TodoRecord {
   Note: string
   IsCompleted: boolean
   CreatedAt: string
+  CompletedAt?: string | null
   ReminderAt?: string | null
   ReminderNotifiedAt?: string | null
   ReminderRepeat: ReminderRepeat
@@ -58,6 +59,7 @@ export interface ClipboardRecord {
   IsPinned: boolean
 }
 export interface DesktopCategoryRecord { Id: string; Name: string; IsCollapsed: boolean; ItemPaths: string[] }
+export interface ClipboardImagePreview { dataUrl: string; width: number; height: number }
 export interface OrganizerEntry { Name: string; Path: string; IsDirectory: boolean }
 export interface SystemMetrics {
   CpuPercent: number
@@ -91,6 +93,8 @@ export interface WidgetPlacement {
 }
 
 export interface AppSettings {
+  SidebarOrder?: import('./sidebar').SidebarPage[]
+  SidebarHidden?: import('./sidebar').SidebarPage[]
   Theme?: 'light' | 'dark'
   AutomaticBackupEnabled: boolean
   BackupRetentionDays: number
@@ -164,6 +168,8 @@ export interface WorkspaceState extends ProductivityState {
 }
 
 export interface DustDeskApi {
+  toolbox: import('./toolbox').ToolboxApi
+  getDroppedPaths(files: File[]): string[]
   selectScreenshotRegion(rect: import('./screenshotDocument').ScreenshotRect, action?: 'edit' | 'copy' | 'save' | 'pin', tool?: import('./screenshotDocument').ScreenshotTool): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
   createScreenshotDocument(png: Uint8Array): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
   readScreenshotDocument(id: string): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
@@ -219,6 +225,7 @@ export interface DustDeskApi {
   saveScreenshot(dataUrl: string): Promise<{ ok: boolean; path?: string; error?: string }>
   pinScreenshot(dataUrl: string): Promise<{ ok: boolean; error?: string }>
   readClipboard(): Promise<{ text: string; imagePngBase64: string }>
+  previewClipboardImage(recordId: string, thumbnail?: boolean): Promise<{ ok: boolean; image?: ClipboardImagePreview; error?: string }>
   writeClipboard(content: { text?: string; imagePngBase64?: string; recordId?: string }): Promise<void>
   onClipboardChanged(callback: (record: ClipboardRecord) => void): () => void
   listDesktopEntries(): Promise<OrganizerEntry[]>

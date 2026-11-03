@@ -70,7 +70,7 @@ export function applyProductivityAction(state: WorkspaceState, action: Productiv
       // The draft's stable request id survives a lost reply or failed local cleanup.
       // Repeating that submission must not create another record, even after deletion.
       if (state.Todos.some(item => item.Id === id) || state.Notes.some(item => item.Id === id) || state.RecycleBin.some(item => (item.kind === 'task' || item.kind === 'note') && item.value.Id === id)) break
-      if (action.kind === 'task') state.Todos.push({ Id: id, Title: title, Tag: '', Note: text, IsCompleted: false, CreatedAt: time, ReminderRepeat: 'None' })
+      if (action.kind === 'task') state.Todos.push({ Id: id, Title: title, Tag: '', Note: text, IsCompleted: false, CreatedAt: time, CompletedAt: null, ReminderRepeat: 'None' })
       else if (action.kind === 'note') {
         const source = state.Notes.find(item => item.Id === action.sourceNoteId)
         state.Notes.unshift({ ...(source ?? { ColorArgb: -411768, FontColorArgb: -1385444, FontSize: 14, FontBold: false, BackgroundImageFileName: '', ImageOnly: false }), Id: id, Title: title, Text: text, CreatedAt: time, UpdatedAt: time })
