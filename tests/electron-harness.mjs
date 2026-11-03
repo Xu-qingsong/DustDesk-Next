@@ -6,7 +6,8 @@ import { _electron as electron } from 'playwright'
 export async function launchDustDesk(options = {}) {
   const tempRoot = options.tempRoot ?? await mkdtemp(path.join(os.tmpdir(), 'dustdesk-electron-test-'))
   const electronApp = await electron.launch({
-    args: [path.resolve(process.cwd(), 'out/main/index.js')],
+    ...(process.env.DUSTDESK_PRESET_EXECUTABLE ? { executablePath: process.env.DUSTDESK_PRESET_EXECUTABLE } : {}),
+    args: process.env.DUSTDESK_PRESET_EXECUTABLE ? [] : [path.resolve(process.cwd(), 'out/main/index.js')],
     env: {
       ...process.env,
       DUSTDESK_TEST_DATA_DIR: path.join(tempRoot, 'data'),
@@ -22,6 +23,10 @@ export async function launchDustDesk(options = {}) {
     : firstWindow)
   await window.waitForLoadState('domcontentloaded')
   await window.waitForSelector('h1')
+  if (options.showToolMenus) await window.evaluate(async () => {
+    const state = await window.dustdesk.loadWorkspace()
+    await window.dustdesk.saveWorkspace({ ...state, Settings: { ...state.Settings, SidebarHidden: (state.Settings.SidebarHidden ?? []).filter(id => !['textTools', 'imageTools', 'lan'].includes(id)) } }, state)
+  })
   return { electronApp, window, tempRoot }
 }
 

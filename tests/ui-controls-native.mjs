@@ -1,0 +1,195 @@
+import assert from 'node:assert/strict'
+import { launchDustDesk, closeDustDesk } from './electron-harness.mjs'
+import { chooseSelect } from './ui-controls.mjs'
+
+const running = await launchDustDesk({ showToolMenus: true })
+try {
+  const page = running.window, errors = []
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  page.on('pageerror', error => errors.push(error.message))
+  const navigate = name => page.locator('.sidebar').getByText(name, { exact: true }).click()
+  await running.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('widget=')).setSize(1400, 900))
+  await page.evaluate(async () => {
+    const state = await window.dustdesk.loadWorkspace()
+    state.Settings.ClipboardMonitoringEnabled = false
+    state.Projects = [{ Id: 'ui-project', Name: 'UI 控件验证', ProjectPath: '', Phases: [{ Id: 'ui-phase', Title: '设计与开发', Status: 'Todo', ProgressPercent: 0, StartDate: new Date('2026-10-01T00:00:00').toISOString(), EndDate: new Date('2026-10-31T00:00:00').toISOString(), ProjectPath: '', Subtasks: [] }] }]
+    state.Todos = [{ Id: 'ui-task', Title: '提醒时间验证', Tag: '', Note: '', IsCompleted: false, CreatedAt: new Date().toISOString(), ReminderRepeat: 'None', ReminderAt: null }]
+    state.LinkGroups = Array.from({ length: 20 }, (_, index) => ({ Id: `ui-group-${index}`, Name: index === 9 ? '设计素材' : `资源分组 ${index + 1}`, Links: [] }))
+    await window.dustdesk.saveWorkspace(state)
+  })
+  await navigate('项目')
+  await page.getByRole('button', { name: '编辑阶段 设计与开发', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑阶段', exact: true })
+  await chooseSelect(dialog.getByLabel('状态', { exact: true }), 'Doing')
+  await dialog.getByRole('button', { name: '选择开始日期', exact: true }).click()
+  await page.screenshot({ path: 'test-artifacts/ui-calendar-native.png' })
+  await page.locator('.control-picker-popup').getByRole('button', { name: '2026-10-03', exact: true }).click()
+  await dialog.getByRole('button', { name: '选择结束日期', exact: true }).click()
+  assert.equal(await page.locator('.control-picker-popup').getByRole('button', { name: '2026-10-01', exact: true }).isDisabled(), true)
+  await page.keyboard.press('Escape')
+  assert.equal(await dialog.count(), 1)
+  await dialog.getByRole('button', { name: '保存阶段', exact: true }).click()
+  await dialog.waitFor({ state: 'hidden' })
+  const phase = await page.evaluate(async () => (await window.dustdesk.loadWorkspace()).Projects[0].Phases[0])
+  assert.equal(phase.Status, 'Doing'); assert.equal(new Date(phase.StartDate).getDate(), 3)
+
+  await navigate('资源库')
+  await page.getByRole('button', { name: '新建链接', exact: true }).click()
+  await page.getByLabel('分类', { exact: true }).click()
+  await page.getByLabel('搜索选项', { exact: true }).fill('设计')
+  assert.equal(await page.locator('[data-control-option]:visible').count(), 1)
+  await page.screenshot({ path: 'test-artifacts/ui-search-select-native.png' })
+  await page.getByLabel('搜索选项', { exact: true }).press('Enter')
+  assert.match(await page.getByLabel('分类', { exact: true }).innerText(), /设计素材/)
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+
+  await navigate('任务')
+  await page.getByTitle('编辑任务', { exact: true }).click()
+  await page.getByLabel('提醒时间', { exact: true }).fill('2026-10-07 09:30')
+  await page.getByRole('button', { name: '选择提醒时间', exact: true }).click()
+  assert.equal(await page.locator('.control-picker-popup').evaluate(element => element.scrollTop), 0)
+  assert.equal(await page.getByLabel('提醒时间', { exact: true }).evaluate(element => element.scrollWidth <= element.clientWidth), true)
+  await page.getByRole('listbox', { name: '分钟', exact: true }).getByRole('option', { name: '45', exact: true }).click()
+  assert.equal(await page.locator('.control-picker-popup').getByRole('button', { name: '确定', exact: true }).evaluate(button => {
+    const bounds = button.getBoundingClientRect()
+    return button.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2))
+  }), true)
+  await page.screenshot({ path: 'test-artifacts/ui-datetime-native.png' })
+  await page.locator('.control-picker-popup').getByRole('button', { name: '确定', exact: true }).click()
+  await page.waitForFunction(async () => (await window.dustdesk.loadWorkspace()).Todos[0].ReminderAt === new Date('2026-10-07T09:45').toISOString())
+
+  for (const zoom of [1, 1.25, 1.5, 2]) {
+    await running.electronApp.evaluate(({ BrowserWindow }, zoom) => BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('widget=')).webContents.setZoomFactor(zoom), zoom)
+    await page.getByRole('button', { name: '选择提醒时间', exact: true }).click()
+    await page.waitForFunction(() => {
+      const popup = document.querySelector('.control-picker-popup')?.getBoundingClientRect()
+      const footer = document.querySelector('.control-picker-footer')?.getBoundingClientRect()
+      return popup && footer && popup.height > 20 && popup.x >= 7 && popup.y >= 7 && popup.right <= innerWidth - 7 && popup.bottom <= innerHeight - 7 && footer.top >= popup.top && footer.bottom <= popup.bottom
+    })
+    assert.equal(await page.getByLabel('提醒时间', { exact: true }).evaluate(element => element.scrollWidth <= element.clientWidth), true)
+    await page.keyboard.press('Escape')
+  }
+  await running.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('widget=')).webContents.setZoomFactor(1))
+
+  await navigate('设置')
+  const anchors = page.getByRole('navigation', { name: '设置锚点导航' })
+  await anchors.getByRole('link', { name: '常规', exact: true }).click()
+  await page.getByRole('button', { name: '深色', exact: true }).click()
+  await anchors.getByRole('link', { name: '搜索与工作时间', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('.settings-anchor-nav a[aria-current="location"]')?.textContent?.includes('搜索与工作时间'))
+  await page.getByRole('button', { name: '选择工作开始时间', exact: true }).click()
+  assert.equal(await page.locator('.control-picker-popup').getByRole('button', { name: '清空', exact: true }).isDisabled(), true)
+  await page.screenshot({ path: 'test-artifacts/ui-time-dark-native.png' })
+  await page.keyboard.press('Escape')
+
+  await navigate('图片工具箱')
+  for (const zoom of [1, 1.25, 1.5, 2]) {
+    await running.electronApp.evaluate(({ BrowserWindow }, zoom) => BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('widget=')).webContents.setZoomFactor(zoom), zoom)
+    await page.getByLabel('格式', { exact: true }).click()
+    await page.waitForFunction(() => {
+      const popup = document.querySelector('.control-select')?.getBoundingClientRect()
+      return popup && popup.height > 20 && popup.x >= 7 && popup.y >= 7 && popup.right <= innerWidth - 7 && popup.bottom <= innerHeight - 7
+    })
+    await page.getByRole('option', { name: 'PNG（无损）', exact: true }).click()
+    assert.match(await page.getByLabel('格式', { exact: true }).innerText(), /PNG/)
+  }
+  await running.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('widget=')).webContents.setZoomFactor(1))
+  await chooseSelect(page.getByLabel('格式', { exact: true }), 'jpeg')
+  const quality = page.getByRole('slider', { name: '有损质量', exact: true })
+  await quality.focus(); await quality.press('ArrowLeft')
+  assert.equal(await quality.inputValue(), '84')
+  await chooseSelect(page.getByLabel('尺寸调整', { exact: true }), 'percent')
+  await page.getByRole('checkbox', { name: '允许放大小图', exact: true }).check()
+  assert.equal(await page.getByRole('checkbox', { name: '允许放大小图', exact: true }).isChecked(), true)
+
+  await navigate('文本工具箱')
+  await page.getByRole('button', { name: '按行去重', exact: true }).click()
+  await page.getByLabel('文本输入', { exact: true }).fill(' 中文\n中文\n\n😀\n😀')
+  await page.getByRole('checkbox', { name: '移除行首尾空白', exact: true }).focus()
+  await page.keyboard.press('Space')
+  await page.getByRole('checkbox', { name: '忽略空行', exact: true }).check()
+  await page.waitForFunction(() => document.querySelector('[aria-label="文本结果"]')?.value === '中文\n😀')
+
+  await navigate('任务')
+  await page.getByRole('button', { name: '全部', exact: true }).click()
+  await page.locator('.todo-row').waitFor()
+  await page.getByTitle('编辑任务', { exact: true }).click()
+  const tags = page.getByLabel('编辑任务标签', { exact: true })
+  await tags.fill('中文😀标签'); await tags.press('ArrowDown'); await tags.press('Enter')
+  await page.waitForFunction(async () => (await window.dustdesk.loadWorkspace()).Todos[0].Tag === '中文😀标签')
+
+  await navigate('设置')
+  await anchors.getByRole('link', { name: '常规', exact: true }).click()
+  const monitoring = page.getByRole('switch', { name: '剪贴板监听', exact: true })
+  assert.equal(await monitoring.getAttribute('aria-checked'), 'false')
+  await monitoring.focus(); await monitoring.press('Space')
+  await page.waitForFunction(async () => (await window.dustdesk.loadWorkspace()).Settings.ClipboardMonitoringEnabled)
+  await monitoring.press('Space')
+  await page.waitForFunction(async () => !(await window.dustdesk.loadWorkspace()).Settings.ClipboardMonitoringEnabled)
+
+  for (const theme of ['浅色', '深色']) {
+    await page.getByRole('button', { name: theme, exact: true }).click()
+    await navigate('便签')
+    const size = page.getByLabel('字号', { exact: true })
+    await size.fill('31')
+    await page.evaluate(async () => {
+      const state = await window.dustdesk.loadWorkspace()
+      await window.dustdesk.saveWorkspace({ ...state, Notes: state.Notes.map((note, index) => index === 0 ? { ...note, FontSize: 22 } : note) }, state)
+    })
+    await page.waitForFunction(() => document.querySelector('.note-text')?.style.fontSize === '22px')
+    assert.equal(await size.inputValue(), '31', 'Background synchronization preserves the numeric draft')
+    await size.press('Enter')
+    await page.waitForFunction(async () => (await window.dustdesk.loadWorkspace()).Notes[0].FontSize === 31)
+    await size.fill(''); assert.equal(await size.inputValue(), '')
+    await page.evaluate(async () => {
+      const state = await window.dustdesk.loadWorkspace()
+      await window.dustdesk.saveWorkspace({ ...state, Notes: state.Notes.map((note, index) => index === 0 ? { ...note, FontSize: 23 } : note) }, state)
+    })
+    await page.waitForFunction(() => document.querySelector('.note-text')?.style.fontSize === '23px')
+    assert.equal(await size.inputValue(), '', 'Background synchronization also preserves a temporarily empty draft')
+    await size.press('Tab')
+    assert.equal(await size.inputValue(), '23', 'An empty draft falls back to the latest committed value on blur')
+    await size.fill('100'); await size.press('Tab')
+    await page.waitForFunction(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.FontSize === 42))
+    await page.locator('.note-style-toolbar .control-number').getByRole('button', { name: '减少数值', exact: true }).click()
+    await page.waitForFunction(async () => (await window.dustdesk.loadWorkspace()).Notes.some(note => note.FontSize === 41))
+    for (const zoom of [1, 1.25, 1.5, 2]) {
+      await running.electronApp.evaluate(({ BrowserWindow }, zoom) => BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('widget=')).webContents.setZoomFactor(zoom), zoom)
+      await page.getByRole('button', { name: '背景', exact: true }).click()
+      await page.waitForFunction(() => {
+        const popup = document.querySelector('.control-color-popup')?.getBoundingClientRect()
+        return popup && popup.width > 20 && popup.x >= 7 && popup.y >= 7 && popup.right <= innerWidth - 7 && popup.bottom <= innerHeight - 7
+      })
+      await page.getByLabel('HEX 颜色', { exact: true }).fill('#123456')
+      await page.getByLabel('HEX 颜色', { exact: true }).press('Enter')
+      await page.getByLabel('R 通道', { exact: true }).fill('300')
+      await page.getByLabel('R 通道', { exact: true }).press('Tab')
+      await page.waitForFunction(() => document.querySelector('[aria-label="HEX 颜色"]')?.value === '#ff3456')
+      if (zoom === 1) await page.screenshot({ path: `test-artifacts/ui-colors-${theme === '浅色' ? 'light' : 'dark'}-native.png` })
+      await page.keyboard.press('Escape')
+      await page.locator('.control-color-popup').waitFor({ state: 'hidden' })
+    }
+    await running.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('widget=')).webContents.setZoomFactor(1))
+    await navigate('设置')
+    await anchors.getByRole('link', { name: '常规', exact: true }).click()
+  }
+
+  await navigate('项目')
+  await page.getByRole('button', { name: '编辑阶段 设计与开发', exact: true }).click()
+  const editPhase = page.getByRole('dialog', { name: '编辑阶段', exact: true })
+  await editPhase.getByTitle('删除阶段', { exact: true }).click()
+  const confirmation = page.getByRole('alertdialog', { name: '确认删除', exact: true })
+  await confirmation.waitFor()
+  assert.equal(await confirmation.getByRole('button', { name: '取消', exact: true }).evaluate(node => node === document.activeElement), true)
+  await page.screenshot({ path: 'test-artifacts/ui-confirm-native.png' })
+  await page.keyboard.press('Enter')
+  await confirmation.waitFor({ state: 'hidden' })
+  await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '删除阶段')
+  assert.equal((await page.evaluate(() => window.dustdesk.loadWorkspace())).Projects[0].Phases.length, 1)
+  await editPhase.getByTitle('删除阶段', { exact: true }).click()
+  await confirmation.getByRole('button', { name: '删除', exact: true }).click()
+  await editPhase.waitFor({ state: 'hidden' })
+  await page.waitForFunction(async () => (await window.dustdesk.loadWorkspace()).Projects[0].Phases.length === 0)
+  assert.deepEqual(errors, [])
+  console.log(JSON.stringify({ calendarAndBounds: true, phasePersistence: true, searchableKeyboardSelection: true, localReminderTime: true, darkTimePicker: true, themedColorAndRgb: true, numericBoundsAndStepper: true, checkboxKeyboardProcessing: true, sliderKeyboard: true, unicodeTags: true, switchPersistence: true, nestedDeleteCancelAndConfirm: true, popupZooms: [1, 1.25, 1.5, 2] }))
+} finally { await closeDustDesk(running) }

@@ -1,3 +1,6 @@
+import { isComposingKey } from '../utils/keyboard'
+import { Checkbox } from "../components/ui/FormControls"
+import { Select } from '../components/ui/Select'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { NoteRecord, WorkspaceState } from '../../../shared/types'
 import { runAction } from '../components/Productivity'
@@ -14,7 +17,7 @@ export function TaskWidget({ state }: { state: WorkspaceState }) {
   }
   const add = () => run(async () => { await runAction({ type: 'capture', kind: 'task', title, text: '' }); setTitle('') })
   const todos = state.Todos.filter(item => !item.IsCompleted)
-  return <div className="editable-widget"><div className="widget-task-add"><input aria-label="桌面新增任务" placeholder="新增任务，Enter 保存" maxLength={300} value={title} disabled={busy} onChange={event => setTitle(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && title.trim()) void add() }} /><button className="mini-button" disabled={busy || !title.trim()} onClick={() => void add()}>添加</button></div>{error && <p role="alert" className="inline-error">{error}</p>}<div className="widget-todos">{todos.map(todo => <label className="widget-todo widget-task-row" key={todo.Id}><input type="checkbox" checked={false} disabled={busy} aria-label={`完成 ${todo.Title}`} onChange={() => void run(() => runAction({ type: 'task-complete', id: todo.Id, completed: true }))} /><span>{todo.Title}</span></label>)}{!todos.length && <p className="widget-empty">今天没有未完成任务</p>}</div></div>
+  return <div className="editable-widget"><div className="widget-task-add"><input aria-label="桌面新增任务" placeholder="新增任务，Enter 保存" maxLength={300} value={title} disabled={busy} onChange={event => setTitle(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !isComposingKey(event.nativeEvent) && title.trim()) void add() }} /><button className="mini-button" disabled={busy || !title.trim()} onClick={() => void add()}>添加</button></div>{error && <p role="alert" className="inline-error">{error}</p>}<div className="widget-todos">{todos.map(todo => <label className="widget-todo widget-task-row" key={todo.Id}><Checkbox checked={false} disabled={busy} aria-label={`完成 ${todo.Title}`} onChange={() => void run(() => runAction({ type: 'task-complete', id: todo.Id, completed: true }))} /><span>{todo.Title}</span></label>)}{!todos.length && <p className="widget-empty">今天没有未完成任务</p>}</div></div>
 }
 
 const drafts = new NoteDraftStore(localStorage)
@@ -87,7 +90,7 @@ function NoteEditor({ note, widgetKey, selector }: { note: NoteRecord; widgetKey
   const message = storageError || error || (conflict ? '便签已在其他窗口修改；本窗口草稿已保留，退出后仍可恢复。' : '')
   return <div className="widget-note-editor">
     <div className="widget-note-toolbar">{selector}<input aria-label="便签标题" value={draft.title} maxLength={300} disabled={busy} onChange={event => set({ ...draft, title: event.target.value })} /></div>
-    {note.ImageOnly && backgroundUrl && !editImageText ? <div className="widget-note-image" style={{ backgroundColor: textStyle.backgroundColor }}><img src={backgroundUrl} alt={note.Title || '便签图片'} /></div> : <textarea aria-label="便签正文" value={draft.text} maxLength={200000} disabled={busy} onChange={event => set({ ...draft, text: event.target.value })} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void save().catch(() => undefined) } }} placeholder="在桌面直接编辑便签…" style={textStyle} />}
+    {note.ImageOnly && backgroundUrl && !editImageText ? <div className="widget-note-image" style={{ backgroundColor: textStyle.backgroundColor }}><img src={backgroundUrl} alt={note.Title || '便签图片'} /></div> : <textarea aria-label="便签正文" value={draft.text} maxLength={200000} disabled={busy} onChange={event => set({ ...draft, text: event.target.value })} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter' && !isComposingKey(event.nativeEvent)) { event.preventDefault(); void save().catch(() => undefined) } }} placeholder="在桌面直接编辑便签…" style={textStyle} />}
     <div className="widget-note-actions">
       <small title="Ctrl+Enter 保存到工作区">{storageError ? '草稿待写入磁盘' : dirty ? '草稿已保留' : '已保存'}</small>
       {note.ImageOnly && backgroundUrl && <button className="mini-button" disabled={busy} onClick={() => setEditImageText(value => !value)}>{editImageText ? '显示图片' : '编辑文字'}</button>}
@@ -116,6 +119,6 @@ export function NotesWidget({ state, noteId }: { state: WorkspaceState; noteId: 
     }
   }, [])
   const note = state.Notes.find(item => item.Id === (noteId || selected)) ?? (!noteId ? state.Notes[0] : undefined)
-  const selector = !noteId && <select aria-label="选择桌面便签" value={note?.Id ?? ''} onChange={event => { setSelected(event.target.value); try { localStorage.setItem('widget-notes:selected', event.target.value) } catch { /* Draft retention does not depend on selection persistence. */ } }}>{state.Notes.map(item => <option key={item.Id} value={item.Id}>{item.Title}</option>)}</select>
+  const selector = !noteId && <Select searchable aria-label="选择桌面便签" value={note?.Id ?? ''} onValueChange={value => { setSelected(value); try { localStorage.setItem('widget-notes:selected', value) } catch { /* Draft retention does not depend on selection persistence. */ } }}>{state.Notes.map(item => <option key={item.Id} value={item.Id}>{item.Title}</option>)}</Select>
   return <div className="editable-widget widget-note-panel">{note ? <NoteEditor key={note.Id} note={note} widgetKey={widgetKey} selector={selector} /> : <p className="widget-empty">便签不存在，可在快速记录中新增。</p>}</div>
 }

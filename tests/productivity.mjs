@@ -1,3 +1,4 @@
+import { chooseSelect } from './ui-controls.mjs'
 import assert from 'node:assert/strict'
 import { mkdir, writeFile, readFile, unlink, utimes, readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -42,6 +43,13 @@ try {
   const capture = app.electronApp.windows().find(page => page.url().includes('capture=')) ?? await app.electronApp.waitForEvent('window')
   await capture.getByLabel('记录标题').fill('Captured from shortcut window')
   await capture.getByLabel('记录正文').fill('capture details')
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await capture.getByLabel('记录正文').dispatchEvent('keydown', { key: 'Enter', ctrlKey: true, ...composition })
+    await capture.getByLabel('记录标题').dispatchEvent('keydown', { key: 'Escape', ...composition })
+    assert.equal((await load()).Todos.some(item => item.Title === 'Captured from shortcut window'), false)
+    assert.equal(await capture.getByLabel('记录标题').inputValue(), 'Captured from shortcut window')
+    assert.equal(await app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('capture='))?.isVisible()), true, 'IME Escape must not hide quick capture')
+  }
   await capture.getByLabel('记录正文').press('Control+Enter')
   await waitForState(state => state.Todos.some(item => item.Title === 'Captured from shortcut window'))
   await app.window.evaluate(() => window.dustdesk.showQuickCapture())
@@ -58,6 +66,11 @@ try {
   await app.window.evaluate(() => window.dustdesk.toggleWidgets('todo'))
   const widget = await widgetPromise
   await widget.getByLabel('桌面新增任务').fill('Desktop direct task')
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await widget.getByLabel('桌面新增任务').dispatchEvent('keydown', { key: 'Enter', ...composition })
+    assert.equal((await load()).Todos.some(item => item.Title === 'Desktop direct task'), false)
+    assert.equal(await widget.getByLabel('桌面新增任务').inputValue(), 'Desktop direct task')
+  }
   await widget.getByLabel('桌面新增任务').press('Enter')
   await widget.getByRole('checkbox', { name: '完成 Desktop direct task', exact: true }).click()
   await waitForState(state => state.Todos.find(item => item.Title === 'Desktop direct task')?.IsCompleted)
@@ -65,6 +78,10 @@ try {
   await app.window.evaluate(() => window.dustdesk.toggleWidgets('notes'))
   const notes = await notePromise
   await notes.getByLabel('便签正文').fill('Changed on desktop')
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    await notes.getByLabel('便签正文').dispatchEvent('keydown', { key: 'Enter', ctrlKey: true, ...composition })
+    assert.equal((await load()).Notes.some(item => item.Text === 'Changed on desktop'), false)
+  }
   await notes.getByLabel('便签正文').press('Control+Enter')
   await waitForState(state => state.Notes.some(item => item.Text === 'Changed on desktop'))
   await notes.getByLabel('便签标题').fill('  Desktop title  ')
@@ -90,9 +107,9 @@ try {
   const category = (await load()).DesktopCategories[1]
   await navigate('桌面收纳')
   await app.window.getByRole('button', { name: '收纳规则', exact: true }).click()
-  await app.window.getByLabel('匹配方式').selectOption('name')
+  await chooseSelect(app.window.getByLabel('匹配方式'), 'name')
   await app.window.getByLabel('规则内容').fill('invoice')
-  await app.window.getByLabel('规则目标分类').selectOption(category.Id)
+  await chooseSelect(app.window.getByLabel('规则目标分类'), category.Id)
   await app.window.getByRole('button', { name: '新增规则', exact: true }).click()
   await waitForState(state => state.OrganizerRules.length === 1)
   await app.window.getByRole('dialog', { name: '收纳规则' }).getByRole('button', { name: '完成', exact: true }).click()
@@ -124,7 +141,7 @@ try {
   console.log('Resource missing paths, HTTP without auto-upgrade, warnings and relink passed')
 
   await navigate('专注计时')
-  await app.window.getByLabel('关联任务').selectOption(original.Todos[0].Id)
+  await chooseSelect(app.window.getByLabel('关联任务'), original.Todos[0].Id)
   await app.window.getByLabel('专注分钟').fill('1')
   await app.window.getByRole('button', { name: '开始专注', exact: true }).click()
   await app.window.getByRole('button', { name: '暂停', exact: true }).waitFor()

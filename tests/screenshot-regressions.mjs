@@ -1,3 +1,4 @@
+import { chooseSelect } from './ui-controls.mjs'
 import assert from 'node:assert/strict'
 import { mkdir, readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -38,6 +39,12 @@ try {
   })
   await page.locator('.sidebar').getByRole('button', { name: '截图编辑', exact: true }).click()
   await importImage()
+  await page.getByRole('button', { name: '自定义颜色', exact: true }).click()
+  await page.getByLabel('HEX 颜色', { exact: true }).fill('#abcdef')
+  await page.getByLabel('HEX 颜色', { exact: true }).press('Enter')
+  await page.keyboard.press('Escape')
+  await page.locator('.control-color-popup').waitFor({ state: 'hidden' })
+  await ready(page)
   const image = page.locator('.screenshot-image'), box = await image.boundingBox()
   await page.getByRole('button', { name: '实色遮盖', exact: true }).click()
   await page.getByRole('button', { name: '颜色 #172333', exact: true }).click()
@@ -51,7 +58,7 @@ try {
   await page.waitForFunction(() => document.querySelector('.screenshot-feedback').textContent.includes('已保存'))
   const png = await readFile(path.join(directory, (await exports())[0]))
   assert.equal(png.readUInt32BE(16), 400); assert.equal(png.readUInt32BE(20), 200)
-  await page.getByLabel('导出格式').selectOption('jpg'); await page.getByRole('button', { name: '保存', exact: true }).click()
+  await chooseSelect(page.getByLabel('导出格式'), 'jpg'); await page.getByRole('button', { name: '保存', exact: true }).click()
   await page.waitForFunction(() => document.querySelector('.screenshot-feedback').textContent.includes('.jpg'))
   const jpg = await readFile(path.join(directory, (await exports()).find(f => f.endsWith('.jpg'))))
   assert.equal(jpg[0], 255); assert.equal(jpg[1], 216)

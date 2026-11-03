@@ -1,0 +1,150 @@
+.control-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; width: 100%; min-height: 36px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-solid); color: var(--text); font-family: inherit; font-size: 12px; line-height: 1.4; text-align: left; transition: border-color .15s, box-shadow .15s; -webkit-app-region: no-drag; }
+.control-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.control-trigger svg { flex-shrink: 0; color: var(--text-faint); }
+.control-trigger:hover:not(:disabled), .control-date-input:hover:not(:has(input:disabled)) { border-color: var(--line-strong); }
+.control-trigger[data-state="open"], .control-date-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.control-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.control-trigger:disabled, .control-date-input:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.control-placeholder { color: var(--text-faint); }
+.control-popup { z-index: 100; padding: 5px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-solid); color: var(--text); box-shadow: 0 10px 32px #133d3026, 0 2px 6px #0000000d; font-size: 12px; -webkit-app-region: no-drag; animation: control-appear .12s ease-out; }
+:root[data-theme='dark'] .control-popup { color-scheme: dark; }
+body:has([data-control-popup]) [data-sonner-toaster] { z-index: 90; }
+.control-select { min-width: var(--radix-select-trigger-width); max-width: min(420px, calc(100vw - 16px)); max-height: min(300px, var(--radix-select-content-available-height)); }
+.control-combobox { width: max(200px, var(--radix-popover-trigger-width)); max-width: calc(100vw - 16px); max-height: min(340px, var(--radix-popover-content-available-height)); overflow: hidden; }
+.control-options { padding: 2px; max-height: 260px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.control-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; padding: 7px 10px; border-radius: 6px; outline: none; cursor: pointer; user-select: none; }
+.control-option > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.control-option[data-highlighted], .control-option[data-selected="true"] { background: var(--accent-soft); color: var(--accent-strong); }
+.control-option[data-state="checked"] { color: var(--accent-strong); }
+.control-option[data-disabled]:not([data-disabled="false"]) { opacity: .4; pointer-events: none; }
+.control-option svg { flex-shrink: 0; color: var(--accent-strong); }
+.control-scroll { display: flex; align-items: center; justify-content: center; height: 20px; color: var(--text-muted); }
+.control-search { display: flex; align-items: center; gap: 8px; padding: 5px 9px 9px; border-bottom: 1px solid var(--line); color: var(--text-faint); }
+.control-search input { width: 100%; min-width: 0; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; height: 28px; }
+.control-search input:focus-visible { outline: none; }
+.control-empty { padding: 20px 10px; color: var(--text-faint); text-align: center; }
+.control-field { display: grid; gap: 5px; min-width: 0; width: 100%; -webkit-app-region: no-drag; }
+.control-date-input { display: flex; align-items: center; min-width: 0; width: 100%; min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-solid); transition: border-color .15s, box-shadow .15s; }
+.control-date-input input[type="text"] { min-width: 0; width: 100%; flex: 1; height: 34px; padding: 0 10px; border: 0; border-radius: inherit; outline: none; color: var(--text); background: transparent; font-size: 12px; font-variant-numeric: tabular-nums; }
+.control-date-input input::placeholder { color: var(--text-faint); font-size: 11px; }
+.control-date-input input:focus-visible { outline: none; }
+.control-date-input .control-picker-button { display: flex; flex: 0 0 32px; align-items: center; justify-content: center; height: 32px; min-height: 0; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--text-faint); }
+.control-picker-button:hover:not(:disabled) { color: var(--accent-strong); background: var(--accent-soft); }
+.control-date-input.is-invalid { border-color: var(--danger); }
+.control-error { color: var(--danger); font-size: 11px; line-height: 1.5; }
+.control-picker-popup { display: flex; flex-direction: column; max-width: calc(100vw - 16px); max-height: var(--radix-popover-content-available-height); padding: 12px; overflow: hidden; }
+.control-picker-body { display: flex; align-items: start; gap: 14px; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.control-calendar { width: 252px; flex-shrink: 0; }
+.control-calendar-heading { display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text-muted); margin-bottom: 3px; }
+.control-popup button { border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+.control-popup button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.control-popup button:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent-strong); }
+.control-popup button:disabled { opacity: .4; cursor: not-allowed; }
+.control-calendar-heading button { display: grid; place-items: center; width: 25px; height: 25px; }
+.control-calendar .rdp-root { --rdp-accent-color: var(--accent-strong); --rdp-accent-background-color: var(--accent-soft); --rdp-day-height: 36px; --rdp-day-width: 36px; --rdp-day_button-height: 32px; --rdp-day_button-width: 32px; --rdp-day_button-border-radius: 6px; --rdp-nav_button-width: 28px; --rdp-nav_button-height: 28px; --rdp-nav-height: 36px; --rdp-outside-opacity: .35; font-size: 12px; }
+.control-calendar .rdp-month_caption { height: 36px; font-size: 13px; }
+.control-calendar .rdp-caption_label { font-weight: 600; }
+.control-calendar .rdp-weekday { font-size: 11px; font-weight: 400; color: var(--text-faint); padding: 8px 0; }
+.control-calendar .rdp-day_button { margin: auto; }
+.control-calendar .rdp-selected .rdp-day_button { background: var(--accent); color: var(--primary-foreground); border-color: transparent; font-weight: 600; }
+.control-calendar .rdp-today:not(.rdp-selected) .rdp-day_button { color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.control-calendar .rdp-chevron { fill: var(--text-muted); width: 15px; height: 15px; }
+.control-calendar-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; color: var(--text-faint); font-size: 10px; }
+.control-calendar-footer button { padding: 6px 8px; font-size: 12px; color: var(--accent-strong); }
+.control-time-panel { min-width: 150px; }
+.control-datetime-popup .control-time-panel { border-left: 1px solid var(--line); padding-left: 14px; }
+.control-time-heading { display: flex; gap: 8px; align-items: center; height: 36px; color: var(--text-muted); }
+.control-time-heading strong { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.control-time-heading span { margin-left: auto; color: var(--text-faint); font-size: 10px; }
+.control-time-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.control-time-columns > div > strong { display: block; color: var(--text-faint); text-align: center; padding: 8px 0; font-size: 11px; font-weight: 400; }
+.control-time-list { max-height: 204px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; scrollbar-width: thin; }
+.control-time-list button { display: block; width: 100%; height: 32px; min-width: 52px; font-variant-numeric: tabular-nums; }
+.control-time-list button[aria-selected="true"] { color: var(--accent-strong); background: var(--accent-soft); font-weight: 600; }
+.control-picker-footer { display: flex; flex-shrink: 0; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.control-picker-footer button { padding: 7px 10px; color: var(--text-muted); }
+.control-picker-footer .control-confirm { margin-left: auto; background: var(--accent); color: var(--primary-foreground); }
+.settings-inline label:has(.control-trigger), .settings-inline label:has(.control-field) { gap: 8px; }
+.settings-inline .control-trigger { width: auto; min-width: 90px; }
+.settings-inline .control-field { width: 126px; }
+.settings-inline .control-date-input input { width: 70px; }
+.screenshot-style-row .control-trigger { width: auto; min-height: 28px; height: 28px; padding: 0 7px; font-size: 12px; }
+.screenshot-tools button.control-trigger { min-width: 60px; border: 1px solid var(--line); background: var(--surface-solid); }
+.widget-stage .control-trigger { min-height: 30px; font-size: 11px; }
+.widget-note-toolbar .control-trigger { width: 36%; flex: 0 1 36%; min-height: 28px; height: 28px; padding: 0 6px; font-size: 12px; }
+@keyframes control-appear { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .control-popup { animation: none; } .control-trigger, .control-date-input { transition: none; } }
+@media (max-width: 480px) { .control-picker-body { flex-direction: column; } .control-datetime-popup .control-time-panel { border-left: 0; border-top: 1px solid var(--line); padding: 8px 0 0; width: 100%; } .control-datetime-popup .control-time-list { max-height: 100px; } }
+
+.control-checkbox { display: inline-flex; position: relative; flex: 0 0 18px; width: 18px; height: 18px; vertical-align: middle; }
+.control-checkbox > input[type="checkbox"] { appearance: none; width: 18px; height: 18px; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-solid); cursor: pointer; }
+.control-checkbox > svg { position: absolute; top: 3px; left: 3px; color: var(--primary-foreground); pointer-events: none; visibility: hidden; }
+.control-checkbox > input:checked { background: var(--accent); border-color: var(--accent); }
+.control-checkbox > input:checked + svg { visibility: visible; }
+.control-checkbox > input:focus-visible, .control-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.control-checkbox:has(input:disabled), .control-switch:disabled { opacity: .45; cursor: not-allowed; }
+.control-checkbox > input:disabled { cursor: not-allowed; }
+.control-switch { -webkit-app-region: no-drag; cursor: pointer; flex-shrink: 0; }
+.control-number { display: flex; position: relative; align-items: center; width: 100%; min-width: 0; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-solid); -webkit-app-region: no-drag; }
+.control-number:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.control-number > input[type="text"], :is(.toolbox-page, .settings-inline, .feature-form-row, .editable-widget) .control-number > input[type="text"] { width: 100%; min-width: 0; height: 34px; min-height: 0; padding: 0 49px 0 9px; border: 0; border-radius: inherit; background: transparent; color: var(--text); outline: 0; font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
+.control-number.control-number-input > input[type="text"], :is(.toolbox-page, .settings-inline, .feature-form-row, .editable-widget) .control-number.control-number-input > input[type="text"] { padding-inline: 9px; }
+.control-number-actions { position: absolute; right: 3px; top: 3px; bottom: 3px; display: flex; gap: 1px; }
+.control-number-actions > button { display: grid; place-items: center; width: 21px; height: 100%; min-height: 0; padding: 0; border: 0; border-radius: 5px; color: var(--text-muted); background: var(--surface-muted); cursor: pointer; }
+.control-number-actions > button:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent-strong); }
+.control-number:has(input:disabled) { opacity: .5; }
+.control-number-actions > button:disabled { opacity: .4; cursor: not-allowed; }
+.control-slider[type="range"] { appearance: none; display: block; width: 100%; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; -webkit-app-region: no-drag; }
+.control-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 10px; background: linear-gradient(to right, var(--accent) 0 var(--control-progress), var(--line) var(--control-progress) 100%); }
+.control-slider::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; margin-top: -5px; border: 2px solid var(--surface-solid); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.control-slider:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 5px; }
+.control-slider:disabled { opacity: .45; cursor: not-allowed; }
+.control-progress { overflow: hidden; width: 100%; height: 6px; border-radius: 10px; background: var(--line); }
+.control-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.lan-task .control-progress { margin: 14px 0; }
+.resource-progress .control-progress { height: 8px; }
+.control-progress.indeterminate > span { animation: control-progress-move 1.5s ease-in-out infinite; }
+@keyframes control-progress-move { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.control-color { display: inline-flex; align-items: center; gap: 8px; min-width: 0; width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-solid); color: var(--text-muted); font: inherit; font-size: 11px; -webkit-app-region: no-drag; cursor: pointer; }
+.control-color-chip { flex: 0 0 18px; width: 18px; height: 18px; border: 1px solid #80808055; border-radius: 4px; }
+.control-color-value { overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.control-color:focus-visible, .control-color[data-state="open"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+.control-color:disabled { opacity: .45; cursor: not-allowed; }
+.control-color-popup { width: 274px; padding: 14px; max-width: calc(100vw - 16px); max-height: var(--radix-popover-content-available-height); overflow: auto; }
+.control-color-title { display: block; margin-bottom: 12px; font-size: 12px; }
+.control-color-presets { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.control-color-presets > button { display: grid; place-items: center; width: 100%; height: 28px; border: 1px solid #80808044; border-radius: 5px; }
+.control-color-presets > button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+.control-color-hex { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 11px; color: var(--text-muted); }
+.control-color-hex > input { min-width: 0; width: 100%; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; outline: 0; background: var(--surface-muted); color: var(--text); font: inherit; }
+.control-color-hex > input:focus-visible { border-color: var(--accent); }
+.control-color-rgb { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.control-color-rgb > label { display: grid; gap: 5px; color: var(--text-muted); font-size: 10px; }
+.control-color-rgb .control-number { height: 32px; }
+.control-color-rgb .control-number > input[type="text"] { height: 30px; padding-inline: 5px; font-size: 11px; }
+.control-tag { min-width: 0; width: 100%; }
+.control-tag > input { width: 100%; }
+.control-tag-popup { min-width: 200px; max-width: calc(100vw - 16px); max-height: min(280px, var(--radix-popover-content-available-height)); overflow: auto; }
+.control-tag-option { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; padding: 7px 9px; text-align: left; cursor: pointer; }
+.control-tag-option > span { min-width: 0; overflow-wrap: anywhere; }
+.control-tag-option > svg { flex-shrink: 0; color: var(--accent-strong); }
+.control-tag-option.selected { background: var(--accent-soft); color: var(--accent-strong); }
+.control-confirm-overlay { position: fixed; inset: 0; z-index: 110; background: #10252066; backdrop-filter: blur(3px); }
+.control-confirm-dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 111; width: min(400px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); color: var(--text); box-shadow: var(--shadow); }
+.control-confirm-heading { display: flex; align-items: center; gap: 10px; }
+.control-confirm-heading > span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.control-confirm-heading h2 { margin: 0; font-size: 16px; }
+.control-confirm-dialog > p { margin: 14px 0 22px; font-size: 13px; line-height: 1.7; color: var(--text-muted); }
+.control-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.control-confirm-actions .control-danger-button { color: var(--surface-solid); background: var(--danger); }
+.settings-inline label:has(.control-number) { gap: 8px; }
+.settings-inline .control-number { width: 112px; }
+.settings-inline .control-color { width: 110px; }
+.note-style-toolbar .control-number { width: 88px; height: 28px; }
+.note-style-toolbar .control-number > input[type="text"] { height: 26px; font-size: 11px; }
+.note-style-toolbar .control-color, .screenshot-style-row .control-color { width: 30px; height: 28px; min-height: 0; padding: 4px; }
+.note-style-toolbar .control-color-value, .screenshot-style-row .control-color-value { display: none; }
+.screenshot-style-row .control-number { width: 48px; height: 28px; }
+.screenshot-style-row .control-number > input[type="text"] { height: 26px; font-size: 11px; }
+.feature-form-row .control-number { width: 116px; }
+@media (prefers-reduced-motion: reduce) { .control-progress.indeterminate > span { animation: none; width: 100% !important; opacity: .5; } }

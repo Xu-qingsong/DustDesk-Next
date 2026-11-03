@@ -1,3 +1,4 @@
+import { chooseSelect } from './ui-controls.mjs'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -42,8 +43,8 @@ try {
   await recent.getByLabel('便签正文').fill('RECENT UNSAVED DRAFT')
   await update("state.Notes[0].Text = 'MAIN EXTERNAL UPDATE'")
   await poll(() => pinned.getByLabel('便签正文').inputValue(), text => text === 'MAIN EXTERNAL UPDATE', 'clean pinned editor receives external edit')
-  await recent.getByLabel('选择桌面便签').selectOption(other.Id)
-  await recent.getByLabel('选择桌面便签').selectOption(target.Id)
+  await chooseSelect(recent.getByLabel('选择桌面便签'), other.Id)
+  await chooseSelect(recent.getByLabel('选择桌面便签'), target.Id)
   assert.equal(await recent.getByLabel('便签正文').inputValue(), 'RECENT UNSAVED DRAFT')
   await pinned.getByLabel('便签正文').fill('PINNED INDEPENDENT DRAFT')
   await update("state.Notes[0].Text = 'LATEST WORKSPACE VALUE'")
@@ -64,20 +65,20 @@ try {
 
   // Quota failure after editing another note must still block quit after that
   // editor is unmounted. This exercises the lifetime of the draft flush guard.
-  await recoveredRecent.getByLabel('选择桌面便签').selectOption(other.Id)
+  await chooseSelect(recoveredRecent.getByLabel('选择桌面便签'), other.Id)
   await recoveredRecent.evaluate(() => {
     window.originalDraftSetItem = Storage.prototype.setItem
     Storage.prototype.setItem = function (key, value) { if (key.startsWith('widget-note:v2:')) throw new Error('simulated draft storage failure'); return window.originalDraftSetItem.call(this, key, value) }
   })
   await recoveredRecent.getByLabel('便签正文').fill('MEMORY DRAFT DURING QUOTA FAILURE')
-  await recoveredRecent.getByLabel('选择桌面便签').selectOption(target.Id)
+  await chooseSelect(recoveredRecent.getByLabel('选择桌面便签'), target.Id)
   await app.electronApp.evaluate(({ dialog, app }) => {
     globalThis.noteQuitError = ''; dialog.showErrorBox = (_title, message) => { globalThis.noteQuitError = message }
     setTimeout(() => app.quit(), 0)
   })
   assert.match(await poll(() => app.electronApp.evaluate(() => globalThis.noteQuitError), Boolean, 'draft storage failure blocks shutdown'), /simulated draft storage failure/)
   await recoveredRecent.evaluate(() => { Storage.prototype.setItem = window.originalDraftSetItem })
-  await recoveredRecent.getByLabel('选择桌面便签').selectOption(other.Id)
+  await chooseSelect(recoveredRecent.getByLabel('选择桌面便签'), other.Id)
   assert.equal(await recoveredRecent.getByLabel('便签正文').inputValue(), 'MEMORY DRAFT DURING QUOTA FAILURE')
 
   // A normal workspace write failure remains fatal to quit even though local
@@ -100,4 +101,37 @@ try {
   assert.equal(saved.Notes.find(note => note.Id === other.Id).Text, 'MEMORY DRAFT DURING QUOTA FAILURE')
   assert.equal(saved.Notes.find(note => note.Id === target.Id).Text, 'LATEST WORKSPACE VALUE')
   console.log('Draft quota and workspace persistence failures block quit until a successful retry')
+
+  app = await launchDustDesk({ tempRoot })
+  await app.window.locator('.sidebar').getByText('便签', { exact: true }).click()
+  await app.window.locator('.note-text').waitFor()
+  await app.electronApp.evaluate(() => {
+    const fs = process.getBuiltinModule('fs'), original = fs.promises.writeFile
+    globalThis.mainNoteWrites = 0
+    fs.promises.writeFile = async (...args) => {
+      if (String(args[0]).includes('.electron-tmp-')) globalThis.mainNoteWrites++
+      return original(...args)
+    }
+  })
+  await app.window.getByLabel('便签标题', { exact: true }).fill('MAIN DELAYED TITLE')
+  await app.window.locator('.note-text').fill('')
+  await app.window.locator('.note-text').pressSequentially('abcdefghijkl', { delay: 5 })
+  await poll(load, state => state.Notes.some(note => note.Title === 'MAIN DELAYED TITLE' && note.Text === 'abcdefghijkl'), 'coalesced main note saved')
+  assert.equal(await app.electronApp.evaluate(() => globalThis.mainNoteWrites), 1)
+  await app.window.locator('.note-text').fill('MAIN QUIT BEFORE DEBOUNCE')
+  await quit()
+  const delayedSaved = JSON.parse(await readFile(path.join(tempRoot, 'data', 'workspace.json'), 'utf8'))
+  assert.equal(delayedSaved.Notes.find(note => note.Title === 'MAIN DELAYED TITLE').Text, 'MAIN QUIT BEFORE DEBOUNCE')
+  app = await launchDustDesk({ tempRoot })
+  await app.window.locator('.sidebar').getByText('便签', { exact: true }).click()
+  assert.equal(await app.window.locator('.note-text').inputValue(), 'MAIN QUIT BEFORE DEBOUNCE')
+  console.log('Main note edits coalesce into one write; immediate normal quit and restart preserve the final body')
+  await app.window.locator('.sidebar').getByText('概览', { exact: true }).click()
+  await app.window.locator('.quick-note').fill('QUICK NOTE QUIT WITHOUT BLUR')
+  await quit()
+  const quickNoteSaved = JSON.parse(await readFile(path.join(tempRoot, 'data', 'workspace.json'), 'utf8'))
+  assert.equal(quickNoteSaved.QuickNote, 'QUICK NOTE QUIT WITHOUT BLUR')
+  app = await launchDustDesk({ tempRoot })
+  assert.equal(await app.window.locator('.quick-note').inputValue(), 'QUICK NOTE QUIT WITHOUT BLUR')
+  console.log('Overview quick note survives immediate normal quit without blur and restart')
 } finally { await closeDustDesk(app) }

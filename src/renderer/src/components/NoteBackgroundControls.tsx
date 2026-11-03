@@ -1,3 +1,4 @@
+import { isComposingKey } from '../utils/keyboard'
 import { useEffect, useRef, useState } from 'react'
 import type { NoteRecord } from '../../../shared/types'
 
@@ -23,7 +24,7 @@ export function NoteBackgroundControls({ note, backgroundUrl, backgroundError }:
     </div>
     {backgroundUrl && <img className="note-background-preview" src={backgroundUrl} alt="便签背景预览" />}
     <label className="note-background-path">背景图片路径
-      <div className="note-background-import"><input className="settings-input note-image-path" aria-label="背景图片路径" value={source} disabled={busy} onChange={event => { setSource(event.target.value); setError('') }} onKeyDown={event => { if (event.key === 'Enter' && source.trim()) { event.preventDefault(); void run(() => window.dustdesk.importNoteBackground(note.Id, source, note.BackgroundImagePath || null)) } }} placeholder="背景图片路径（可选）" />
+      <div className="note-background-import"><input className="settings-input note-image-path" aria-label="背景图片路径" value={source} disabled={busy} onChange={event => { setSource(event.target.value); setError('') }} onKeyDown={event => { if (event.key === 'Enter' && !isComposingKey(event.nativeEvent) && source.trim()) { event.preventDefault(); void run(() => window.dustdesk.importNoteBackground(note.Id, source, note.BackgroundImagePath || null)) } }} placeholder="背景图片路径（可选）" />
         <button className="mini-button" disabled={busy || !source.trim()} onClick={() => void run(() => window.dustdesk.importNoteBackground(note.Id, source, note.BackgroundImagePath || null))}>{busy ? '处理中…' : '导入背景'}</button></div>
     </label>
     <small className="muted">导入后复制到应用数据目录，原文件不受影响。</small>

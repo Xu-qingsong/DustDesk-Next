@@ -1,3 +1,6 @@
+import { ColorPicker } from "../components/ui/ColorPicker"
+import { NumberInput, Checkbox } from "../components/ui/FormControls"
+import { Select } from '../components/ui/Select'
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ArrowUpRight, Circle, Copy, Crop, Download, Eraser, Highlighter, Maximize, MousePointer2, Move, Pencil, Pin, Redo2, Save, Shield, Square, Type, Undo2, X, Hash, Minus, Grid2X2, Droplets } from 'lucide-react'
 import { annotationBounds, applyDocumentEdit, clampRect, constrainedPoint, defaultAnnotationStyle, documentEdit, hitAnnotation, rectFromPoints, screenshotColors, transformAnnotation } from '../../../shared/screenshotDocument'
@@ -237,7 +240,8 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   useEffect(() => { if (ready && payload.initialAction && !initialActionStarted.current) { initialActionStarted.current = true; void finish(payload.initialAction) } }, [ready])
   const keyboard = useRef<(event: KeyboardEvent) => void>(() => {}), keyboardBlur = useRef<() => void>(() => {})
   keyboard.current = (event: KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      if (event.target instanceof HTMLElement && event.target.closest('[data-control-popup], [data-control-trigger]')) return
       const input = event.target instanceof HTMLElement && (event.target.matches('input,textarea,select') || event.target.isContentEditable)
       if (input) return
       if (event.code === 'Space') { event.preventDefault(); space.current = true; updateCursor(); return }
@@ -378,8 +382,12 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
     element?.addEventListener('wheel', wheel, { passive: false })
     return () => element?.removeEventListener('wheel', wheel)
   }, [])
-  const below = offset.y + ((crop?.y || 0) + (crop?.height || 0)) * scale + 12
-  const toolbarTop = Math.max(8, Math.min(size.height - toolbarSize.height - 8, below + toolbarSize.height <= size.height ? below : offset.y + (crop?.y || 0) * scale + 30))
+  const selectionTop = offset.y + (crop?.y || 0) * scale
+  const below = selectionTop + (crop?.height || 0) * scale + 12
+  // Leave room for the pixel-size badge above the selection. When the bottom
+  // edge has no room, keep the tools outside the selection on its upper side.
+  const above = selectionTop - toolbarSize.height - 30
+  const toolbarTop = Math.max(8, Math.min(size.height - toolbarSize.height - 8, below + toolbarSize.height <= size.height - 8 ? below : above))
   const activeStyle = selectedAnnotation?.style || text?.annotation.style || style
   const pendingCrop = !floating && crop && JSON.stringify(crop) !== JSON.stringify(doc.crop)
   const button = (label: string, Icon: React.ElementType, action: () => void, disabled = false) => <button type="button" title={label} aria-label={label} disabled={busy || !ready || disabled} onClick={action}><Icon size={16} /></button>
@@ -408,12 +416,12 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
         <div className="screenshot-tool-group">{button('复制', Copy, () => void finish('copy'), Boolean(text) || Boolean(pendingCrop))}{button('保存', Save, () => void finish('save'), Boolean(text) || Boolean(pendingCrop))}{button('另存为', Download, () => void finish('saveAs'), Boolean(text) || Boolean(pendingCrop))}{button('贴图', Pin, () => void finish('pin'), Boolean(text) || Boolean(pendingCrop))}{doc.targetPinId && <button disabled={busy || !ready || Boolean(text) || Boolean(pendingCrop)} onClick={() => void finish('updatePin')}>更新贴图</button>}{floating && button('在应用内编辑', Maximize, () => void finish('openEditor'), Boolean(text))}{onCancel && button('取消截图', X, onCancel)}</div>
       </div>
       <div className="screenshot-style-row">
-        <div className="screenshot-palette">{screenshotColors.map(color => <button type="button" key={color} aria-label={`颜色 ${color}`} title={color} disabled={busy} style={{ background: color }} className={activeStyle.color === color ? 'selected' : ''} onClick={() => changeStyle({ color })} />)}<input type="color" aria-label="自定义颜色" disabled={busy} value={activeStyle.color} onChange={event => changeStyle({ color: event.target.value })} /></div>
-        <label>粗细<input aria-label="粗细" type="number" min={1} max={200} disabled={busy} value={activeStyle.width} onChange={event => changeStyle({ width: Math.max(1, Math.min(200, Number(event.target.value) || 1)) })} /></label>
-        <label>字号<input aria-label="字号" type="number" min={8} max={200} disabled={busy} value={activeStyle.fontSize} onChange={event => changeStyle({ fontSize: Math.max(8, Math.min(200, Number(event.target.value) || 8)) })} /></label>
-        <label><input type="checkbox" aria-label="填充" disabled={busy} checked={activeStyle.filled} onChange={event => changeStyle({ filled: event.target.checked })} />填充</label>
-        {(['mosaic', 'blur', 'cover'].includes(tool) || selectedAnnotation && ['mosaic', 'blur', 'cover'].includes(selectedAnnotation.kind)) && <><select aria-label="遮盖方式" disabled={busy} value={activeStyle.mode} onChange={event => changeStyle({ mode: event.target.value as AnnotationStyle['mode'] })}><option value="rectangle">框选</option><option value="brush">涂抹</option></select><label>强度<input aria-label="遮盖强度" type="number" min={1} max={80} disabled={busy} value={activeStyle.strength} onChange={event => changeStyle({ strength: Math.max(1, Math.min(80, Number(event.target.value) || 1)) })} /></label></>}
-        <select aria-label="导出格式" disabled={busy} value={format} onChange={event => setFormat(event.target.value as 'png' | 'jpg')}><option value="png">PNG</option><option value="jpg">JPG</option></select>
+        <div className="screenshot-palette">{screenshotColors.map(color => <button type="button" key={color} aria-label={`颜色 ${color}`} title={color} disabled={busy} style={{ background: color }} className={activeStyle.color === color ? 'selected' : ''} onClick={() => changeStyle({ color })} />)}<ColorPicker aria-label="自定义颜色" disabled={busy} value={activeStyle.color} onValueChange={nextValue => changeStyle({ color: nextValue })} /></div>
+        <label>粗细<NumberInput variant="input" aria-label="粗细" min={1} max={200} disabled={busy} value={activeStyle.width} onValueChange={nextValue => changeStyle({ width: Math.max(1, Math.min(200, Number(nextValue) || 1)) })} /></label>
+        <label>字号<NumberInput variant="input" aria-label="字号" min={8} max={200} disabled={busy} value={activeStyle.fontSize} onValueChange={nextValue => changeStyle({ fontSize: Math.max(8, Math.min(200, Number(nextValue) || 8)) })} /></label>
+        <label><Checkbox aria-label="填充" disabled={busy} checked={activeStyle.filled} onChange={event => changeStyle({ filled: event.target.checked })} />填充</label>
+        {(['mosaic', 'blur', 'cover'].includes(tool) || selectedAnnotation && ['mosaic', 'blur', 'cover'].includes(selectedAnnotation.kind)) && <><Select aria-label="遮盖方式" disabled={busy} value={activeStyle.mode} onValueChange={value => changeStyle({ mode: value as AnnotationStyle['mode'] })}><option value="rectangle">框选</option><option value="brush">涂抹</option></Select><label>强度<NumberInput variant="input" aria-label="遮盖强度" min={1} max={80} disabled={busy} value={activeStyle.strength} onValueChange={nextValue => changeStyle({ strength: Math.max(1, Math.min(80, Number(nextValue) || 1)) })} /></label></>}
+        <Select aria-label="导出格式" disabled={busy} value={format} onValueChange={value => setFormat(value as 'png' | 'jpg')}><option value="png">PNG</option><option value="jpg">JPG</option></Select>
       </div>
       <div className="screenshot-view-row">{button('适应窗口', Maximize, () => { setZoom(null); setPan({ x: 0, y: 0 }) })}<button disabled={busy} onClick={() => { setZoom(nativeScale); setPan({ x: 0, y: 0 }) }}>100%</button><button disabled={busy} aria-label="缩小" onClick={() => zoomAt(scale / 1.2)}>−</button><span>{Math.round(scale / nativeScale * 100)}%</span><button disabled={busy} aria-label="放大" onClick={() => zoomAt(scale * 1.2)}>＋</button><span><Move size={12} /> 空格拖动画布 · Shift 约束</span>
         {pendingCrop && <><button disabled={busy} onClick={() => commit({ ...doc, crop: crop! })}>确认裁剪</button><button disabled={busy} onClick={() => updateCrop(doc.crop)}>取消裁剪</button></>}

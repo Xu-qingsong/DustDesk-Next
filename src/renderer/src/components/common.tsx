@@ -1,7 +1,7 @@
 import React from 'react'
 import type { WorkspaceState } from '../../../shared/types'
 
-export type PersistWorkspace = (next: WorkspaceState, message?: string) => Promise<void>
+export type PersistWorkspace = (next: WorkspaceState, message?: string, delayMs?: number) => Promise<void>
 export interface PageProps { state: WorkspaceState; persist: PersistWorkspace }
 
 type IconType = React.ComponentType<{ size?: number; strokeWidth?: number }>

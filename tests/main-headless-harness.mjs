@@ -5,6 +5,8 @@ import path from 'node:path'
 import os from 'node:os'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
 
 // Compile the real main-process implementation, replacing only native/system
 // boundaries. No Electron process, desktop window, shortcut or clipboard access.
@@ -56,7 +58,7 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
   const childProcess = { execFile: () => { throw Error('System processes are forbidden in headless tests') } }
   const key = crypto.randomUUID()
   const fixtures = globalThis.__dustdeskHeadlessFixtures ??= new Map()
-  fixtures.set(key, { electron, fileSystem, childProcess, existsSync: nodeFs.existsSync })
+  fixtures.set(key, { electron, fileSystem, childProcess, existsSync: nodeFs.existsSync, readFileSync: nodeFs.readFileSync, createReadStream: nodeFs.createReadStream, createWriteStream: nodeFs.createWriteStream })
   t.after(async () => {
     shutdownWidgets()
     for (const window of virtualWindows) if (window.options && !window.isDestroyed()) window.destroy()
@@ -65,7 +67,7 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
   })
   const mocks = {
     electron: 'export const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, screen, shell, Tray } = fixture.electron;',
-    'node:fs': 'export const promises = fixture.fileSystem; export const existsSync = fixture.existsSync;',
+    'node:fs': 'export const promises = fixture.fileSystem; export const existsSync = fixture.existsSync; export const readFileSync = fixture.readFileSync; export const createReadStream = fixture.createReadStream; export const createWriteStream = fixture.createWriteStream;',
     'node:child_process': 'export function execFile(...args) { return fixture.childProcess.execFile(...args) }',
     systeminformation: 'export default { currentLoad: async () => ({ currentLoad: 5 }), mem: async () => ({ total: 1000, available: 500 }), fsSize: async () => [], networkStats: async () => [], inetLatency: async () => -1, time: () => ({ uptime: 60 }) };',
     xlsx: 'export const utils = {}; export function writeFile() { throw Error("Spreadsheet export is not mocked") }'
@@ -84,7 +86,7 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     compiled.set(sourcePath, url)
     let source = await fs.readFile(sourcePath, 'utf8')
     if (sourcePath === path.join(sourceRoot, 'main', 'index.ts')) {
-      source += '\nexport { registerIpc };\nexport function setScreenshotTestWindow(window) { mainWindow = window };\nexport function stopWidgetTestWindows() { isQuitting = true; for (const window of widgetWindows.values()) window.destroy() };\n'
+      source += '\nexport { registerIpc, restoreOrganizerForQuit, resumeOrganizerSession, prepareToQuit };\nexport function setScreenshotTestWindow(window) { mainWindow = window };\nexport function stopWidgetTestWindows() { isQuitting = true; for (const window of widgetWindows.values()) window.destroy() };\n'
       for (const [name, directory] of Object.entries({ DATA: data, USER_DATA: path.join(root, 'user-data'), DESKTOP: path.join(root, 'desktop') })) {
         source = source.replaceAll(`process.env.DUSTDESK_TEST_${name}_DIR`, JSON.stringify(directory))
       }
@@ -92,7 +94,7 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     let output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
     for (const match of [...output.matchAll(/(?:from\s*|import\s*\()(['"])([^'"]+)\1/g)]) {
       const specifier = match[2]
-      const replacement = mockUrls.get(specifier) ?? (specifier.startsWith('.') ? await compile(path.resolve(path.dirname(sourcePath), specifier + '.ts')) : specifier)
+      const replacement = mockUrls.get(specifier) ?? (specifier.startsWith('.') ? await compile(path.resolve(path.dirname(sourcePath), specifier + '.ts')) : ['selfsigned', 'yazl'].includes(specifier) ? pathToFileURL(require.resolve(specifier)).href : specifier)
       output = output.replaceAll(`${match[1]}${specifier}${match[1]}`, JSON.stringify(replacement))
     }
     await fs.mkdir(path.dirname(target), { recursive: true })
@@ -114,5 +116,5 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     }
   }
   const invoke = client()
-  return { root, data, electron, fileSystem, childProcess, shortcutCalls, invoke, client, windows: virtualWindows, handlers, load: () => invoke('workspace:load') }
+  return { root, data, electron, fileSystem, childProcess, shortcutCalls, invoke, client, windows: virtualWindows, handlers, load: () => invoke('workspace:load'), restoreOrganizerForQuit: main.restoreOrganizerForQuit, resumeOrganizerSession: main.resumeOrganizerSession, prepareToQuit: main.prepareToQuit }
 }

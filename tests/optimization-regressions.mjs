@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import path from 'node:path'
 import { closeDustDesk, launchDustDesk } from './electron-harness.mjs'
 
@@ -7,6 +8,10 @@ let fixture = await launchDustDesk()
 const load = () => fixture.window.evaluate(() => window.dustdesk.loadWorkspace())
 const root = fixture.tempRoot
 const workspaceFile = path.join(root, 'data', 'workspace.json')
+let releaseTag = 'v1.0.0'
+const releaseServer = createServer((_request, response) => { response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ tag_name: releaseTag, body: '发布说明' })) })
+await new Promise(resolve => releaseServer.listen(0, '127.0.0.1', resolve))
+const releaseTarget = `http://127.0.0.1:${(releaseServer.address()).port}/latest`
 try {
   const encoded = await fixture.electronApp.evaluate(({ nativeImage }) => {
     const bytes = Buffer.alloc(256 * 256 * 4)
@@ -31,17 +36,14 @@ try {
   console.log('Legacy clipboard migration preserves images and shrinks workspace payload')
 
   const expectedPixels = await fixture.electronApp.evaluate(({ nativeImage }, encoded) => process.getBuiltinModule('crypto').createHash('sha256').update(nativeImage.createFromBuffer(Buffer.from(encoded, 'base64')).toBitmap()).digest('hex'), encoded)
-  await fixture.electronApp.evaluate(({ clipboard }) => {
+  await fixture.electronApp.evaluate(({ clipboard, session }, target) => {
     globalThis.originalImageWriter = clipboard.writeImage
     clipboard.writeImage = image => { globalThis.copiedImage = process.getBuiltinModule('crypto').createHash('sha256').update(image.toBitmap()).digest('hex') }
-    process.getBuiltinModule('electron').net.fetch = async () => new Response(JSON.stringify({ tag_name: 'v1.0.0', body: '发布说明' }))
-  })
+    session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://api.github.com/*'] }, (_details, callback) => callback({ redirectURL: target }))
+  }, releaseTarget)
   assert.equal((await fixture.window.evaluate(() => window.dustdesk.checkForUpdate())).available, false)
-  await fixture.electronApp.evaluate(() => {
-    const { net, dialog } = process.getBuiltinModule('electron')
-    net.fetch = async () => new Response(JSON.stringify({ tag_name: 'v1.1.0', body: '新版本发布说明' }))
-    dialog.showMessageBox = async () => ({ response: 0 })
-  })
+  releaseTag = 'v1.1.0'
+  await fixture.electronApp.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0 }) })
   assert.equal((await fixture.window.evaluate(() => window.dustdesk.checkForUpdate())).available, true)
   await fixture.window.evaluate(() => window.dustdesk.writeClipboard({ recordId: 'image' }))
   assert.equal(await fixture.electronApp.evaluate(() => globalThis.copiedImage), expectedPixels)
@@ -152,5 +154,6 @@ try {
     if (globalThis.originalReaddir) fs.readdir = globalThis.originalReaddir
     globalThis.releaseSearch?.()
   }).catch(() => {})
+  releaseServer.close()
   await closeDustDesk(fixture)
 }

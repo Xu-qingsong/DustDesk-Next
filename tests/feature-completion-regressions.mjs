@@ -1,3 +1,4 @@
+import { chooseSelect } from './ui-controls.mjs'
 import assert from 'node:assert/strict'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -75,8 +76,8 @@ try {
   assert.equal(moved.ok, true)
   await navigate('桌面收纳')
   await fixture.window.getByRole('button', { name: '分类管理', exact: true }).click()
-  await fixture.window.locator('.category-manager-row select').first().selectOption(source.Id)
-  await fixture.window.locator('.category-manager-row select').nth(1).selectOption(target.Id)
+  await chooseSelect(fixture.window.locator('.category-manager-row [role="combobox"]').first(), source.Id)
+  await chooseSelect(fixture.window.locator('.category-manager-row [role="combobox"]').nth(1), target.Id)
   await fixture.window.getByRole('button', { name: '合并分类', exact: true }).click()
   await poll(load, state => !state.DesktopCategories.some(item => item.Id === source.Id), 'category merge')
   await fixture.window.getByRole('dialog', { name: '分类管理' }).getByRole('button', { name: '完成', exact: true }).click()
@@ -196,7 +197,7 @@ try {
   assert.equal((await fixture.window.evaluate(png => window.dustdesk.pinScreenshot(png), png)).ok, true)
   const closed = fixture.electronApp.waitForEvent('close', { timeout: 8000 })
   const started = Date.now()
-  await fixture.electronApp.evaluate(({ app, dialog }) => { dialog.showErrorBox = (_title, error) => { throw Error(error) }; setTimeout(() => app.quit(), 0) })
+  await fixture.electronApp.evaluate(({ app, dialog }) => { dialog.showErrorBox = (_title, error) => { throw Error(error) }; dialog.showMessageBox = async () => ({ response: 1 }); setTimeout(() => app.quit(), 0) })
   await closed
   console.log('Quit with pinned image and editing windows completed in ' + (Date.now() - started) + 'ms')
   const tempRoot = fixture.tempRoot
