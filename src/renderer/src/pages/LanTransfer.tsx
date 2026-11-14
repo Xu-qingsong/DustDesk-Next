@@ -7,6 +7,7 @@ import type { LanSnapshot, ToolAsset, TransferStatus } from '../../../shared/too
 import { toolError } from '../../../shared/toolbox'
 import { Panel } from '../components/common'
 import { fileSize } from '../toolbox/format'
+import { useFilesDropped } from '../hooks/useFilesDropped'
 
 type TaskAction = 'pause' | 'resume' | 'cancel' | 'clear'
 const taskStates: Record<TransferStatus, { label: string; actions: TaskAction[]; finished?: boolean }> = {
@@ -21,6 +22,7 @@ const taskStates: Record<TransferStatus, { label: string; actions: TaskAction[];
 const actionLabels = { pause: '暂停', resume: '继续 / 重试', cancel: '取消' }
 
 export function LanTransfer({ active }: { active: boolean }) {
+  const dropTarget = useRef<HTMLDivElement>(null)
   const [snapshot, setSnapshot] = useState<LanSnapshot>({ enabled: false, devices: [], tasks: [], addresses: [], port: 0 })
   const [device, setDevice] = useState(''), [address, setAddress] = useState(''), [port, setPort] = useState(''), [assets, setAssets] = useState<ToolAsset[]>([])
   const [mode, setMode] = useState<'files' | 'text'>('files'), [text, setText] = useState(''), [error, setError] = useState('')
@@ -69,10 +71,12 @@ export function LanTransfer({ active }: { active: boolean }) {
   })
   const send = () => perform('form', () => window.dustdesk.toolbox.lanSend(device, mode === 'files' ? assets.map(asset => asset.id) : [], mode === 'text' ? text : undefined))
 
-  return <div className="toolbox-page" onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }} onDrop={event => {
+  useFilesDropped(dropTarget, active && !busy, paths => { void perform('form', async () => { const imported = await window.dustdesk.toolbox.registerPaths(paths, 'transfer');setAssets(current => [...current,...imported]);setMode('files') }) })
+
+  return <div ref={dropTarget} className="toolbox-page" onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }} onDrop={event => {
     event.preventDefault()
     if (!active || busy) return
-    const paths = window.dustdesk.getDroppedPaths([...event.dataTransfer.files])
+    const paths = '__TAURI_INTERNALS__' in window ? [] : window.dustdesk.getDroppedPaths([...event.dataTransfer.files])
     if (paths.length) void perform('form', async () => {
       const imported = await window.dustdesk.toolbox.registerPaths(paths, 'transfer')
       setAssets(current => [...current, ...imported]); setMode('files')

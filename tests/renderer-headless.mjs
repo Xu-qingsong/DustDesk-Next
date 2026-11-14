@@ -1,11 +1,12 @@
 import { chooseSelect } from './ui-controls.mjs'
+import { pointerDrag, keyboardPickup, keyboardMove } from './pointer-drag.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
-import ts from 'typescript'
+import { electronPreloadSource } from './preload-source.mjs'
 import { mainFixture } from './main-headless-harness.mjs'
 
 const browserPath = [process.env.DUSTDESK_HEADLESS_BROWSER, chromium.executablePath(),
@@ -41,7 +42,7 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort())
   const page = await context.newPage()
   const errors = []
-  const requestedChunks = [], workspaceSaves = [], flushReplies = []
+  const requestedChunks = [], workspaceSaves = [], flushReplies = [], ipcErrors = []
   let delayedWorkspaceRead
   page.on('pageerror', error => errors.push(error.message))
   page.on('request', request => { if (request.url().endsWith('.js')) requestedChunks.push(request.url()) })
@@ -54,16 +55,20 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
     if (channel === 'screenshot:finish' && args[0].png) args[0].png = new Uint8Array(Object.values(args[0].png))
     if (channel === 'screenshot:finish' && args[0].jpeg) args[0].jpeg = new Uint8Array(Object.values(args[0].jpeg))
     const gate = channel === 'workspace:load' ? delayedWorkspaceRead : undefined
-    if (gate) delayedWorkspaceRead = undefined
-    const result = await invoke(channel, ...args)
-    if (gate) { gate.started(result); await gate.wait }
+    let result
+    try { result = await invoke(channel, ...args) }
+    catch (error) { ipcErrors.push({ channel, message: String(error) }); throw error }
+    if (gate && gate === delayedWorkspaceRead && gate.matches(result)) {
+      delayedWorkspaceRead = undefined
+      gate.started(result); await gate.wait
+    }
     return result
   })
   await page.exposeFunction('__dustdeskSend', (channel, args) => { if (channel === 'workspace:flushed') flushReplies.push(args) })
-  const preload = ts.transpileModule(await fs.readFile('src/preload/index.ts', 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
-    .replace(/import\s+\{[^}]+\}\s+from\s+['"]electron['"];?/, '')
+  const preload = await electronPreloadSource()
   await page.addInitScript({ content: `(() => {
     const process = { platform: 'win32' };
+    const webUtils = { getPathForFile: () => '' };
     const listeners = new Map();
     const contextBridge = { exposeInMainWorld: (name, value) => { window[name] = value } };
     const ipcRenderer = {
@@ -94,6 +99,8 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
       await page.waitForTimeout(30)
     }
     const diagnostic = await page.evaluate(async () => ({ notes: (await window.dustdesk.loadWorkspace()).Notes.map(note => ({ id: note.Id, title: note.Title, color: note.ColorArgb })), colorInputs: [...document.querySelectorAll('.control-color-popup input')].map(input => ({ label: input.getAttribute('aria-label'), value: input.value })), categories: (await window.dustdesk.loadWorkspace()).DesktopCategories, selections: [...document.querySelectorAll('.organizer-dialog select')].map(item => ({ label: item.getAttribute('aria-label'), value: item.value })), title: document.querySelector('.note-title')?.value, notifications: [...document.querySelectorAll('[data-sonner-toast]')].map(item => item.textContent) }))
+    diagnostic.recentWorkspaceSaves = workspaceSaves.slice(-5).map(([state, baseline]) => ({ notes: state.Notes, baselineNotes: baseline?.Notes, categories: state.DesktopCategories.map(category => category.Name) }))
+    diagnostic.ipcErrors = ipcErrors; diagnostic.pageErrors = errors
     throw Error('Timed out waiting for persisted state: ' + predicate.toString() + '\n' + JSON.stringify(diagnostic))
   }
 
@@ -205,12 +212,18 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
     await page.evaluate(() => window.__dustdeskReceive('workspace:resume'))
   }
   await flushRenderer('before-stale-reload')
+  await fontSize.focus()
   let readStarted, releaseRead
   const reading = new Promise(resolve => { readStarted = resolve })
-  delayedWorkspaceRead = { started: readStarted, wait: new Promise(resolve => { releaseRead = resolve }) }
+  delayedWorkspaceRead = { matches: state => state.Notes.some(note => note.Title === 'HEADLESS_NOTE' && note.Text === 'local edit before delayed reload'), started: readStarted, wait: new Promise(resolve => { releaseRead = resolve }) }
   t.after(() => releaseRead())
+  await Promise.race([
+    page.evaluate(() => window.dustdesk.loadWorkspace()),
+    reading.then(() => { throw Error('An unrelated pre-edit read consumed the delayed local-save snapshot checkpoint') })
+  ])
   await page.locator('.note-text').fill('local edit before delayed reload')
   const captured = await reading
+  assert.equal(captured.Notes.find(note => note.Title === 'HEADLESS_NOTE')?.Text, 'local edit before delayed reload', 'Delay the snapshot of the completed local edit, rather than an earlier focus/blur save')
   const remoteText = 'newer edit from another window'
   await fixture.invoke('workspace:save', { ...captured, Notes: captured.Notes.map(note => note.Title === 'HEADLESS_NOTE' ? { ...note, Text: remoteText } : note) }, captured)
   await page.waitForFunction(text => document.querySelector('.note-text')?.value === text, remoteText, { timeout: 45_000 })
@@ -245,7 +258,7 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   assert.equal(await page.locator('.sidebar').getByText('局域网传输', { exact: true }).count(), 1)
   assert.deepEqual((await page.locator('.nav-list .nav-item > span').allTextContents()).slice(0, 3), ['概览', '便签', '任务'])
   await navigate('设置')
-  await page.getByRole('button', { name: '拖动排序：概览', exact: true }).dragTo(page.locator('[data-menu-id="projects"]'))
+  await pointerDrag(page.getByRole('button', { name: '拖动排序：概览', exact: true }),page.locator('[data-menu-id="projects"]'))
   await waitForState(async () => (await window.dustdesk.loadWorkspace()).Settings.SidebarOrder[0] === 'notes')
   await page.getByRole('switch', { name: '显示菜单：局域网传输', exact: true }).click()
   await waitForState(async () => (await window.dustdesk.loadWorkspace()).Settings.SidebarHidden.includes('lan'))
@@ -679,13 +692,12 @@ test('headless renderer uses the real preload and main IPC for editing, recovery
   assert.equal(await fs.readFile(path.join(desktop, '工作报告.txt'), 'utf8'), '工作报告.txt')
   await categoryDialog.getByRole('button', { name: '完成', exact: true }).click()
 
-  const dragged = await page.evaluateHandle(target => { const transfer = new DataTransfer(); transfer.setData('text/plain', target); return transfer }, path.join(desktop, '项目资料'))
-  await page.locator('.category-card > div').first().dispatchEvent('dragover', { dataTransfer: dragged })
+  const dragged=page.getByRole('button',{name:'拖动收纳 项目资料',exact:true})
+  await keyboardPickup(dragged);await keyboardMove(dragged,'ArrowDown')
   await page.getByText('松开即可收纳', { exact: true }).waitFor()
-  await page.locator('.category-card > div').first().dispatchEvent('drop', { dataTransfer: dragged })
+  await dragged.press('Space')
   await page.getByRole('button', { name: '打开 项目资料', exact: true }).waitFor({ state: 'detached' })
   assert.equal((await fixture.load()).DesktopCategories[0].ItemPaths.length, 1)
-  await dragged.dispose()
   await page.getByRole('button', { name: '恢复全部', exact: true }).click()
   await page.getByRole('button', { name: '打开 项目资料', exact: true }).waitFor()
   await page.getByRole('button', { name: '智能预览', exact: true }).click()

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "toolbox-images"
+description = "Main-window image asset and user-selected batch export operations"
+commands.allow = ["toolbox_pick", "toolbox_register_paths", "toolbox_import_image", "toolbox_read_asset", "toolbox_release_assets", "toolbox_begin_image_export", "toolbox_export_image", "toolbox_end_image_export"]

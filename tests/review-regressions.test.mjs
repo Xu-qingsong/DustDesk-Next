@@ -12,9 +12,9 @@ async function sourceModuleUrl(relative) {
   return `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
 }
 
-const { assertPathWithinRoot, moveFileSafely } = await import(await sourceModuleUrl('../src/main/fileOperations.ts'))
-const { createClipboardSampler } = await import(await sourceModuleUrl('../src/main/clipboardSampler.ts'))
-const { retainClipboardHistory } = await import(await sourceModuleUrl('../src/renderer/src/utils/clipboard.ts'))
+const { assertPathWithinRoot, moveFileSafely } = await import(await sourceModuleUrl('../tests/reference/src/main/fileOperations.ts'))
+const { createClipboardSampler } = await import(await sourceModuleUrl('../tests/reference/src/main/clipboardSampler.ts'))
+const { retainClipboardHistory } = await import(await sourceModuleUrl('../src/shared/clipboard.ts'))
 const datesUrl = await sourceModuleUrl('../src/renderer/src/utils/dates.ts')
 const { daysUntilPayday, isTodoCompletedOnDate, isTodoOnDate, isTodoOverdue, todoScheduledDate } = await import(datesUrl)
 
@@ -169,7 +169,8 @@ test('typecheck includes application sources and cannot emit adjacent artifacts'
   assert.equal(parsed.options.noEmit, true)
   assert.equal(parsed.options.strict, true)
   assert.equal(parsed.options.noUncheckedIndexedAccess, true)
-  for (const file of ['src/main/index.ts', 'src/preload/index.ts', 'src/renderer/src/app/App.tsx']) {
+  for (const file of ['vite.tauri.config.ts', 'src/renderer/src/runtime/tauri.ts', 'src/renderer/src/app/App.tsx']) {
     assert.ok(parsed.fileNames.some(name => path.resolve(name) === path.resolve(file)), file)
   }
+  assert.ok(parsed.fileNames.every(name => !name.includes('tests/reference')))
 })

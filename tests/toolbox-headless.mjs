@@ -4,7 +4,7 @@ import { existsSync, promises as fs } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { chromium } from 'playwright'
-import ts from 'typescript'
+import { electronPreloadSource } from './preload-source.mjs'
 import { deflateSync } from 'node:zlib'
 import { mainFixture } from './main-headless-harness.mjs'
 
@@ -33,7 +33,7 @@ test('toolbox pages use real IPC and Workers, preserve drafts and export a singl
     if (['toolbox:import-image','toolbox:export-image'].includes(channel)) {const i=channel==='toolbox:import-image'?0:2;args[i]=new Uint8Array(Object.values(args[i]))}
     const result=await invoke(channel,...args);return channel==='toolbox:read-asset'?Array.from(result):result
   })
-  const preload=ts.transpileModule(await fs.readFile('src/preload/index.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText.replace(/import\s+\{[^}]+\}\s+from\s+['"]electron['"];?/,'')
+  const preload=await electronPreloadSource()
   await page.addInitScript({content:`(()=>{
     const NativeWorker=Worker;window.__imageWorkers=[];window.Worker=class extends NativeWorker{constructor(...args){super(...args);window.__imageWorkers.push(String(args[0]))}};
     const process={platform:'win32'},listeners=new Map(),webUtils={getPathForFile:()=>''};

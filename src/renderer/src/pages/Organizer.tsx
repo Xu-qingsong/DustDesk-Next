@@ -1,7 +1,9 @@
 import { Select } from '../components/ui/Select'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode, type MouseEvent } from 'react'
+import { DndContext, KeyboardSensor, PointerSensor, pointerWithin, rectIntersection, useDraggable, useDroppable, useSensor, useSensors, type KeyboardCoordinateGetter } from '@dnd-kit/core'
+import { CSS } from '@dnd-kit/utilities'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { Check, ChevronRight, FolderInput, FolderOpen, LayoutGrid, Plus, RefreshCw, RotateCcw, SlidersHorizontal, Undo2, WandSparkles, X } from 'lucide-react'
+import { Check, ChevronRight, FolderInput, FolderOpen, GripVertical, LayoutGrid, Plus, RefreshCw, RotateCcw, SlidersHorizontal, Undo2, WandSparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DesktopCategoryRecord, OrganizerEntry, OrganizerPlanItem, WorkspaceState } from '../../../shared/types'
 import { OrganizerRules, useOperation } from '../components/Productivity'
@@ -12,6 +14,29 @@ import { organizerWidgetKey, useWidgetVisibility } from '../hooks/useWidgetVisib
 import { uid } from '../utils/ids'
 import { searchTargetId, useSearchReveal, type SearchNavigation } from '../app/searchNavigation'
 
+const organizerKeyboardCoordinates: KeyboardCoordinateGetter = (event,{context}) => {
+  if (!['ArrowDown','ArrowRight','ArrowUp','ArrowLeft'].includes(event.code)) return
+  event.preventDefault()
+  const categories=context.droppableContainers.getEnabled().filter(container=>container.data.current?.categoryId)
+  if (!categories.length) return
+  const direction=event.code==='ArrowDown'||event.code==='ArrowRight'?1:-1
+  const index=categories.findIndex(category=>category.id===context.over?.id)
+  const destination=categories[Math.max(0,Math.min(categories.length-1,index<0?(direction>0?0:categories.length-1):index+direction))]
+  const bounds=destination&&context.droppableRects.get(destination.id)
+  if (!bounds||!context.collisionRect) return
+  return {x:bounds.left+(bounds.width-context.collisionRect.width)/2,y:bounds.top+(bounds.height-context.collisionRect.height)/2}
+}
+function DraggableEntry({ entry, busy, children, onContextMenu }: { entry: OrganizerEntry; busy: boolean; children: ReactNode; onContextMenu: (event: MouseEvent<HTMLElement>) => void }) {
+  const {attributes,listeners,setNodeRef,setActivatorNodeRef,transform,isDragging}=useDraggable({id:'entry:'+entry.Path,data:{path:entry.Path},disabled:busy})
+  return <article ref={setNodeRef} className="organizer-entry" style={{transform:CSS.Translate.toString(transform),zIndex:isDragging?10:undefined}} onContextMenu={onContextMenu}>
+    <button ref={setActivatorNodeRef} type="button" className="icon-button organizer-entry-drag" {...attributes} {...listeners} disabled={busy} aria-label={'拖动收纳 '+entry.Name} title="拖动收纳"><GripVertical size={15}/></button>{children}
+  </article>
+}
+function DroppableCategory({category,busy,children}:{category:DesktopCategoryRecord;busy:boolean;children:ReactNode}) {
+  const {setNodeRef,isOver}=useDroppable({id:'category:'+category.Id,data:{categoryId:category.Id},disabled:busy})
+  return <Panel className={'category-card '+(isOver?'drop-active':'')}><div ref={setNodeRef}>{children}</div></Panel>
+}
+
 export function Organizer({ state, persist, navigation }: { state: WorkspaceState; persist: (next: WorkspaceState, message?: string) => Promise<void>; navigation?: SearchNavigation }) {
   const [entries, setEntries] = useState<OrganizerEntry[]>([])
   const [plan, setPlan] = useState<OrganizerPlanItem[]>([])
@@ -21,6 +46,7 @@ export function Organizer({ state, persist, navigation }: { state: WorkspaceStat
   const [mergeTargetId, setMergeTargetId] = useState('')
   const [dragCategoryId, setDragCategoryId] = useState('')
   const { busy, run } = useOperation()
+  const sensors=useSensors(useSensor(PointerSensor,{activationConstraint:{distance:6}}),useSensor(KeyboardSensor,{coordinateGetter:organizerKeyboardCoordinates}))
   const selectedCategory = state.DesktopCategories.find(item => item.Id === selectedCategoryId)
   const selectedIndex = state.DesktopCategories.findIndex(item => item.Id === selectedCategoryId)
   const widgets = useWidgetVisibility()
@@ -128,7 +154,7 @@ export function Organizer({ state, persist, navigation }: { state: WorkspaceStat
     await persist({ ...state, DesktopCategories: categories }, '分类顺序已更新')
   }
 
-  return <>
+  return <DndContext sensors={sensors} collisionDetection={args=>{const collisions=pointerWithin(args);return collisions.length?collisions:rectIntersection(args)}} accessibility={{screenReaderInstructions:{draggable:'按空格开始收纳，使用方向键选择分类，再按空格放置，按 Escape 取消。'}}} onDragOver={({over})=>setDragCategoryId(over?.data.current?.categoryId??'')} onDragCancel={()=>setDragCategoryId('')} onDragEnd={({active,over})=>{setDragCategoryId('');if(busy)return;const entry=entries.find(item=>item.Path===active.data.current?.path);const category=state.DesktopCategories.find(item=>item.Id===over?.data.current?.categoryId);if(entry&&category)void run(()=>move(entry,category))}}>
     <PageHeader title="桌面收纳" action={<div className="organizer-page-actions">
       <div className="studio-actions">
         <button className="primary-button" onClick={() => void run(preview)} disabled={busy}><WandSparkles size={16} />智能预览</button>
@@ -141,7 +167,7 @@ export function Organizer({ state, persist, navigation }: { state: WorkspaceStat
       </div>
     </div>} />
     <Panel className="organizer-desktop-panel">
-      <div className="panel-heading"><div><h3>桌面项目</h3><p className="organizer-caption">选择分类收纳，或将项目拖入下方分类。</p></div><div className="studio-actions"><span className="muted">{entries.length} 个项目</span><button className="secondary-button" onClick={() => void run(refresh)} disabled={busy}><RefreshCw size={15} />扫描</button></div></div>
+      <div className="panel-heading"><div><h3>桌面项目</h3><p className="organizer-caption">选择分类或拖入下方收纳，恢复时自动放回原位。</p><p className="organizer-caption">Windows 开启“自动排列图标”时，位置由系统排列。</p></div><div className="studio-actions"><span className="muted">{entries.length} 个项目</span><button className="secondary-button" onClick={() => void run(refresh)} disabled={busy}><RefreshCw size={15} />扫描</button></div></div>
       {plan.length > 0 && <section className="organizer-plan" aria-label="整理预览">
         <div className="organizer-plan-heading">
           <div className="organizer-plan-title"><span className="organizer-plan-mark" aria-hidden="true"><FolderInput size={18} /></span><div><div className="organizer-plan-title-line"><h3>整理预览</h3><span className="organizer-plan-count">{plan.length} 个项目</span></div><p>确认文件与目标分类后执行整理。</p></div></div>
@@ -157,29 +183,27 @@ export function Organizer({ state, persist, navigation }: { state: WorkspaceStat
         </ul>
       </section>}
       <div className="organizer-entries" aria-label="桌面项目宫格" aria-busy={busy}>
-        {entries.map(entry => <article className="organizer-entry" key={entry.Path} draggable={!busy} onDragStart={event => { event.dataTransfer.setData('text/plain', entry.Path); event.dataTransfer.effectAllowed = 'move' }} onContextMenu={event => { event.preventDefault(); void window.dustdesk.showPathContextMenu(entry.Path).catch(() => toast.error('无法打开文件菜单')) }}>
+        {entries.map(entry => <DraggableEntry key={entry.Path} entry={entry} busy={busy} onContextMenu={event => { event.preventDefault(); void window.dustdesk.showPathContextMenu(entry.Path).then(result => { if (!result.ok) toast.error(result.error || '无法打开文件菜单') }).catch(() => toast.error('无法打开文件菜单')) }}>
           <span className="organizer-entry-type">{entry.IsDirectory ? '文件夹' : /\.lnk$/i.test(entry.Name) ? '快捷方式' : /\.(exe|msi)$/i.test(entry.Name) ? '应用程序' : '文件'}</span>
           <button className="organizer-entry-open" title={entry.Path} aria-label={`打开 ${entry.Name}`} onClick={() => void open(entry)}><PathIcon path={entry.Path} isDirectory={entry.IsDirectory} size={40} /><strong>{entry.Name}</strong></button>
           <DropdownMenu.Root modal={false}>
-            <DropdownMenu.Trigger asChild><button className="organizer-entry-menu-trigger" title="收纳到分类" aria-label={`收纳 ${entry.Name} 到分类`} disabled={busy} onDragStart={event => event.preventDefault()}><FolderInput size={16} /></button></DropdownMenu.Trigger>
+            <DropdownMenu.Trigger asChild><button className="organizer-entry-menu-trigger" title="收纳到分类" aria-label={`收纳 ${entry.Name} 到分类`} disabled={busy}><FolderInput size={16} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal><DropdownMenu.Content className="organizer-entry-menu" side="bottom" align="end" sideOffset={6} collisionPadding={12}>
               <DropdownMenu.Label className="organizer-entry-menu-label">收纳到分类</DropdownMenu.Label>
               {state.DesktopCategories.map(category => <DropdownMenu.Item className="organizer-entry-menu-item" key={category.Id} disabled={busy} onSelect={() => void run(() => move(entry, category))}><FolderOpen size={15} /><span>{category.Name}</span><small>{category.ItemPaths.length}</small></DropdownMenu.Item>)}
               {!state.DesktopCategories.length && <DropdownMenu.Item className="organizer-entry-menu-item" onSelect={() => setModal('categories')}><Plus size={15} /><span>新增分类</span></DropdownMenu.Item>}
             </DropdownMenu.Content></DropdownMenu.Portal>
           </DropdownMenu.Root>
-        </article>)}
+        </DraggableEntry>)}
         {!entries.length && <Empty icon={FolderOpen} title={busy ? '正在扫描桌面' : '桌面很整洁'} description={busy ? '正在读取桌面项目。' : '没有找到可收纳的文件或目录。'} />}
       </div>
     </Panel>
     <div className="organizer-section-heading"><h3>已收纳分类</h3><span className="muted">{state.DesktopCategories.length} 个分类</span></div>
     <div className="category-grid organizer-categories">
-      {state.DesktopCategories.map(category => <Panel key={category.Id} className={`category-card ${dragCategoryId === category.Id ? 'drop-active' : ''}`}>
-        <div onDragOver={event => { if (busy) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDragCategoryId(category.Id) }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragCategoryId('') }} onDrop={event => { event.preventDefault(); setDragCategoryId(''); if (busy) return; const source = event.dataTransfer.getData('text/plain'); const entry = entries.find(item => item.Path === source); if (entry) void run(() => move(entry, category)) }}>
+      {state.DesktopCategories.map(category => <DroppableCategory key={category.Id} category={category} busy={busy}>
           <button id={searchTargetId('category', category.Id)} data-search-target className="category-title category-select" title={`管理 ${category.Name}`} onClick={() => { setSelectedCategoryId(category.Id); setModal('categories') }}><FolderOpen size={18} /><strong>{category.Name}</strong><span>{category.ItemPaths.length}</span></button>
           <div className="category-drop"><span>{dragCategoryId === category.Id ? '松开即可收纳' : '拖入此分类收纳'}</span>{category.ItemPaths.slice(-3).map(item => <small key={item} title={item}>{item.split(/[\\/]/).pop()}</small>)}{!category.ItemPaths.length && <small>暂无项目</small>}</div>
-        </div>
-      </Panel>)}
+      </DroppableCategory>)}
       {!state.DesktopCategories.length && <Empty icon={FolderOpen} title="还没有分类" description="创建分类后即可收纳桌面项目。" action={<button className="secondary-button" onClick={() => setModal('categories')}><Plus size={15} />新增分类</button>} />}
     </div>
     {modal && <div className="modal-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeModal() }}>
@@ -200,5 +224,5 @@ export function Organizer({ state, persist, navigation }: { state: WorkspaceStat
         </div><div className="modal-actions"><button className="secondary-button" onClick={closeModal}>完成</button></div></div>
       </div>
     </div>}
-  </>
+  </DndContext>
 }

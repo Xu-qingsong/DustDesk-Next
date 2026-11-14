@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "toolbox-lan"
+description = "Main-only isolated LAN service with native confirmations and transfer task control; no renderer sockets or arbitrary paths."
+commands.allow = ["toolbox_lan_attach", "toolbox_lan_snapshot", "toolbox_lan_enable", "toolbox_lan_connect", "toolbox_lan_send", "toolbox_lan_control"]

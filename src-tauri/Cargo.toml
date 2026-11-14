@@ -1,0 +1,58 @@
+[package]
+name = "dustdesk-tauri"
+version = "1.0.3"
+edition = "2021"
+rust-version = "1.88"
+description = "DustDesk desktop workspace with Rust and Tauri"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-ico"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
+png = "0.17"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+uuid = { version = "1", features = ["v4"] }
+fs2 = "0.4"
+tokio = { version = "1", features = ["time", "sync", "macros", "rt", "net", "io-util", "fs"] }
+tokio-util = { version = "0.7", features = ["rt", "io"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+hyper = { version = "1", features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+socket2 = "0.6"
+reqwest = { version = "0.13", default-features = false, features = ["native-tls"] }
+sha2 = "0.10"
+subtle = "2.6"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem", "zeroize"] }
+time = "0.3"
+zeroize = "1"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+base64 = "0.22"
+icu_collator = "2"
+icu_locale_core = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+rust_xlsxwriter = "0.102"
+zip = { version = "9.5", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.62"
+windows = { version = "0.62", features = ["Win32_System_Diagnostics_ToolHelp", "Win32_System_Pipes", "Win32_System_Registry", "Win32_Security", "Win32_Security_Cryptography", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Performance", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Storage_FileSystem", "Foundation", "Data_Xml_Dom", "UI_Notifications", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging", "Graphics_Capture", "Graphics_DirectX", "Graphics_DirectX_Direct3D11", "Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11", "Win32_System_WinRT_Graphics_Capture"] }
+windows-sys = { version = "0.61", features = ["Win32_System_LibraryLoader", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62", features = ["Win32_System_IO", "Win32_System_Ioctl"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+panic = "abort"

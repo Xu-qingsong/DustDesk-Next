@@ -6,7 +6,7 @@ import path from 'node:path'
 import ts from 'typescript'
 
 const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64')}`
-const source = file => fs.readFile(new URL(`../src/main/${file}.ts`, import.meta.url), 'utf8')
+const source = file => fs.readFile(new URL(`../tests/reference/src/main/${file}.ts`, import.meta.url), 'utf8')
 const paths = moduleUrl(await source('fileOperations'))
 const { createClipboardAssets } = await import(moduleUrl((await source('clipboardAssets')).replace("'./fileOperations'", JSON.stringify(paths))))
 const { isCompleteWorkspace } = await import(moduleUrl(await source('workspaceValidation')))

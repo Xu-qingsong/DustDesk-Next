@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "recovery",
+  "description": "Native hidden recovery page only; no workspace editing, window management or generic event authority",
+  "windows": ["workspace-recovery"],
+  "permissions": ["draft-startup-worker"]
+}

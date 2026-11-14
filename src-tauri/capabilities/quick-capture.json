@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick-capture",
+  "description": "Native quick capture with a narrow API and no generic window or event permissions.",
+  "windows": ["quick-capture"],
+  "permissions": ["quick-capture"]
+}

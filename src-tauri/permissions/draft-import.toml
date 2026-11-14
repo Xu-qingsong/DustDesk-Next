@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "draft-import"
+description = "Main-only native selection and bounded reading of a migration archive; read-only durable transaction inspection for uncertain IPC outcomes."
+commands.allow = ["drafts_pick", "drafts_import_state"]

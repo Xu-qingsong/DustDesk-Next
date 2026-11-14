@@ -1,0 +1,31 @@
+{
+  "format": "dustdesk-trusted-legacy-releases",
+  "version": 1,
+  "repository": "Xu-qingsong/DustDesk-Next",
+  "releases": [
+    {
+      "version": "1.0.2",
+      "platform": "windows-x64",
+      "zipName": "DustDesk-1.0.2-x64-green.zip",
+      "zipSha256": "336a0be3d3843e0c65d58718ce6b44b4215d0ab79b04d43427d446b15ea81759",
+      "checksumsSha256": "3a34683506d8b75bdcf2af628cf55bfb9803e18cfd8ce6d2c22acb17e69cb53c",
+      "files": [
+        {
+          "path": "DustDesk.exe",
+          "size": 204596736,
+          "sha256": "f8f294df3836fa9559630bb7f40f71573a6ff9dd10ba636ec042976a8480ebc2"
+        },
+        {
+          "path": "resources/app.asar",
+          "size": 65068711,
+          "sha256": "311bdd4495d47bb62a803c48793b5b5c6d47826318787277fbb492ccbd0ea27b"
+        }
+      ],
+      "packageName": "dustdesk-electron",
+      "mainEntry": "out/main/index.js",
+      "browserEntry": "out/renderer/index.html",
+      "dataRelativeToAppData": "DustDesk.Next/Data",
+      "lanRelativeToUserData": "LanTransfers"
+    }
+  ]
+}

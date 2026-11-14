@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture",
+  "description": "Native-owned screenshot overlays without workspace or filesystem authority",
+  "windows": ["screenshot-overlay-*"],
+  "permissions": ["screenshot-overlay"]
+}

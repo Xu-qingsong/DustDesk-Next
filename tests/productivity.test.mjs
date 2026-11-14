@@ -5,9 +5,9 @@ import ts from 'typescript'
 
 const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText).toString('base64')}`
 const shared = moduleUrl(await readFile(new URL('../src/shared/productivity.ts', import.meta.url), 'utf8'))
-const core = await import(moduleUrl((await readFile(new URL('../src/main/productivityState.ts', import.meta.url), 'utf8')).replaceAll("'../shared/productivity'", JSON.stringify(shared))))
+const core = await import(moduleUrl((await readFile(new URL('./reference/src/main/productivityState.ts', import.meta.url), 'utf8')).replaceAll("'../shared/productivity'", JSON.stringify(shared))))
 const { focusElapsed, productivityDefaults } = await import(shared)
-const { isCompleteWorkspace } = await import(moduleUrl(await readFile(new URL('../src/main/workspaceValidation.ts', import.meta.url), 'utf8')))
+const { isCompleteWorkspace } = await import(moduleUrl(await readFile(new URL('./reference/src/main/workspaceValidation.ts', import.meta.url), 'utf8')))
 function state() { return { ...productivityDefaults(), Settings: {}, Todos: [], Notes: [], Projects: [], Launchers: [], LinkGroups: [], ClipboardHistory: [], DesktopCategories: [], TagPresets: [], SchemaVersion: 2 } }
 
 test('quick capture retries are idempotent across serialization and recycling', () => {

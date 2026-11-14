@@ -1,0 +1,24 @@
+[[permission]]
+identifier = "screenshot-documents"
+description = "Main-window native screenshot sessions with bounded binary source access and explicit discard."
+commands.allow = ["screenshot_create", "screenshot_import", "screenshot_document", "screenshot_source", "screenshot_discard", "screenshot_finish", "screenshot_editor_pending", "screenshot_editor_received"]
+
+[[permission]]
+identifier = "screenshot-window-capture"
+description = "Main-window enumeration and WGC capture of exact short-lived native window source tokens."
+commands.allow = ["screenshot_windows", "screenshot_capture_window"]
+
+[[permission]]
+identifier = "screenshot-start"
+description = "Main only: start a native business screenshot overlay."
+commands.allow = ["screenshot_start"]
+
+[[permission]]
+identifier = "screenshot-overlay"
+description = "Exact native overlay session: own screenshot operations and purpose-bound lifecycle checkpoints through a private channel."
+commands.allow = ["screenshot_overlay_document", "screenshot_overlay_source", "screenshot_overlay_finish", "screenshot_overlay_cancel", "screenshot_overlay_region", "screenshot_overlay_adopt", "screenshot_overlay_events_attach", "screenshot_overlay_events_detach", "screenshot_overlay_checkpoint"]
+
+[[permission]]
+identifier = "screenshot-pin"
+description = "Exact native pin owner: metadata, bounded binary pixels, explicit controls and save."
+commands.allow = ["screenshot_pin_info", "screenshot_pin_source", "screenshot_pin_control", "screenshot_pin_save", "screenshot_pin_attach", "screenshot_pin_detach"]

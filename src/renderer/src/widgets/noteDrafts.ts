@@ -1,9 +1,10 @@
 import type { NoteRecord } from '../../../shared/types'
+import { noteDraftStorageKey } from '../../../shared/draftMigration'
 
 export type NoteDraft = { title: string; text: string; previousTitle: string; previousText: string }
 export const isDirtyDraft = (draft: NoteDraft) => draft.title !== draft.previousTitle || draft.text !== draft.previousText
 export const savedNoteDraft = (note: NoteRecord): NoteDraft => ({ title: note.Title, text: note.Text, previousTitle: note.Title, previousText: note.Text })
-export const noteDraftKey = (widgetKey: string, noteId: string) => `widget-note:v2:${encodeURIComponent(widgetKey)}:${encodeURIComponent(noteId)}`
+export const noteDraftKey = noteDraftStorageKey
 const serializeDraft = (draft: NoteDraft) => JSON.stringify(isDirtyDraft(draft) ? draft : { saved: true })
 
 function parseDraft(value: string | null): NoteDraft | undefined {
@@ -47,5 +48,9 @@ export class NoteDraftStore {
       this.storage.setItem(key, serializeDraft(this.drafts.get(key)!))
       this.pending.delete(key)
     }
+  }
+
+  canRelease() {
+    return this.pending.size === 0 && [...this.drafts.values()].every(draft => !isDirtyDraft(draft))
   }
 }

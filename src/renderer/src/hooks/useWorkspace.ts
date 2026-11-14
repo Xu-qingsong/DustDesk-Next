@@ -70,6 +70,7 @@ export function useWorkspace() {
     if (!pending.current.length && !activeSave.current) return
     do { await flush() } while (pending.current.length)
   }), [flush])
+  useEffect(() => window.dustdesk.onMainWindowReleaseCheck(() => readable.current && !pending.current.length && !activeSave.current && !saving.current), [])
   useEffect(() => () => { clearTimeout(timer.current); void flush().catch(() => {}) }, [flush])
 
   const persist = useCallback<PersistWorkspace>(async (next, message = '已保存', delayMs = 0) => {

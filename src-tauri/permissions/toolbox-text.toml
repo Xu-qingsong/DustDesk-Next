@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "toolbox-text"
+description = "Main-only bounded text export through a native save dialog and serialized clipboard write; no renderer destination path."
+commands.allow = ["toolbox_export_text", "toolbox_copy_text"]

@@ -1,0 +1,31 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workspace",
+  "description": "Isolated shared React workspace with explicit application commands",
+  "windows": [
+    "workspace-main"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "workspace",
+    "draft-verifier",
+    "draft-transaction",
+    "draft-import",
+    "draft-export",
+    "data-snapshot",
+    "handoff-snapshot",
+    "legacy-source-inspection",
+    "project-export",
+    "toolbox-text",
+    "toolbox-images",
+    "toolbox-lan",
+    "file-drop",
+    "screenshot-documents",
+    "screenshot-window-capture",
+    "screenshot-start",
+    "release-update",
+    "draft-startup-main",
+    "widget-manager"
+  ]
+}

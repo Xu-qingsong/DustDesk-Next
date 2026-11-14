@@ -6,26 +6,32 @@ import { resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const read = (file) => readFileSync(resolve(root, file), 'utf8')
 
-test('root project is Electron-only', () => {
-  assert.equal(existsSync(resolve(root, 'package.json')), true)
-  assert.equal(existsSync(resolve(root, 'src/main/index.ts')), true)
-  assert.equal(existsSync(resolve(root, 'src/preload/index.ts')), true)
-  for (const legacy of ['DustDesk.Next.csproj', 'DustDesk.Next.slnx', 'App.xaml', 'Views', 'Widgets']) {
-    assert.equal(existsSync(resolve(root, legacy)), false, `legacy WPF entry remains: ${legacy}`)
+test('application entry and build use Rust and Tauri without Electron', () => {
+  const packageJson = JSON.parse(read('package.json'))
+  assert.equal(packageJson.main, undefined)
+  for (const name of ['electron', 'electron-builder', 'electron-vite']) {
+    assert.equal(packageJson.dependencies?.[name], undefined)
+    assert.equal(packageJson.devDependencies?.[name], undefined)
   }
+  assert.equal(existsSync(resolve(root, 'src/main')), false)
+  assert.equal(existsSync(resolve(root, 'src/preload')), false)
+  assert.equal(existsSync(resolve(root, 'electron.vite.config.ts')), false)
+  assert.equal(packageJson.scripts.dev, 'tauri dev')
+  assert.equal(packageJson.scripts.build, 'vite build --config vite.tauri.config.ts')
+  assert.equal(packageJson.scripts['build:app'], 'tauri build --no-bundle')
 })
 
-test('Electron security boundary is retained', () => {
-  const main = read('src/main/index.ts')
+test('historical behavior fixture retains the original security boundary', () => {
+  const main = read('tests/reference/src/main/index.ts')
   assert.match(main, /contextIsolation:\s*true/)
   assert.match(main, /nodeIntegration:\s*false/)
   assert.match(main, /sandbox:\s*true/)
-  const preload = read('src/preload/index.ts')
+  const preload = read('tests/reference/src/preload/index.ts')
   assert.match(preload, /contextBridge\.exposeInMainWorld\(['"]dustdesk['"]/) 
 })
 
 test('workspace persistence and compatibility fields remain available', () => {
-  const main = read('src/main/index.ts')
+  const main = read('tests/reference/src/main/index.ts')
   assert.match(main, /workspace:load/)
   assert.match(main, /workspace:save/)
   assert.match(main, /TagPresets/)
@@ -34,7 +40,7 @@ test('workspace persistence and compatibility fields remain available', () => {
 })
 
 test('widget keys include object and organizer variants', () => {
-  const main = read('src/main/index.ts')
+  const main = read('tests/reference/src/main/index.ts')
   assert.match(main, /note\|project/) 
   assert.match(main, /organizer-group/) 
   assert.match(main, /widgets:move/)

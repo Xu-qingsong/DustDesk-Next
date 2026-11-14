@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "project-export"
+description = "Main-only export of a native workspace snapshot through a user-selected save dialog; no renderer destination paths or generic write access."
+commands.allow = ["projects_export"]

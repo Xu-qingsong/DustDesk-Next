@@ -1,0 +1,16 @@
+.tauri-migration-status { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 12px; }
+.tauri-migration-status span { display: flex; align-items: center; gap: 8px; }
+.tauri-migration-status button, .tauri-workspace-start button { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px 12px; cursor: pointer; }
+.tauri-workspace-start { padding: 32px; color: var(--text); }
+.tauri-workspace-start h1 { display: flex; align-items: center; gap: 8px; font-size: 24px; }
+.tauri-workspace-start button { margin-right: 12px; }
+.tauri-workspace-start h1, .tauri-workspace-start h2 { margin-bottom: 8px; }
+.tauri-workspace-start p { margin-bottom: 12px; }
+.tauri-workspace-start section { margin-top: 24px; }
+.tauri-workspace-start section h2 { font-size: 18px; }
+.tauri-workspace-start .backup-row strong { overflow-wrap: anywhere; }
+.tauri-runtime-error { padding: 10px 20px; color: var(--danger, #b42318); overflow-wrap: anywhere; }
+.tauri-draft-import { padding: 8px 20px; color: var(--text); background: var(--surface); border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.tauri-draft-import p { margin: 8px 0; }
+.tauri-draft-import button { margin-right: 8px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; }
+.tauri-draft-import [role="alert"] { color: var(--danger, #b42318); }

@@ -6,6 +6,7 @@ export type ScreenshotAnnotation = { id: string; kind: Exclude<ScreenshotTool, '
 export type ScreenshotDocument = { id: string; sourceAssetId: string; width: number; height: number; crop: ScreenshotRect; annotations: ScreenshotAnnotation[]; revision: number; nextNumber: number; targetPinId?: string; sourceRect?: ScreenshotRect }
 export type ScreenshotAction = 'copy' | 'save' | 'saveAs' | 'pin' | 'openEditor' | 'updatePin'
 export type ScreenshotPayload = { document: ScreenshotDocument; png: Uint8Array; placement?: ScreenshotRect; initialAction?: 'copy' | 'save' | 'pin'; initialTool?: ScreenshotTool }
+export type ScreenshotImportSource = Uint8Array | { path: string }
 export type ScreenshotFinishRequest = { requestId: string; document: ScreenshotDocument; action: ScreenshotAction; png?: Uint8Array; jpeg?: Uint8Array; format?: 'png' | 'jpg' }
 export const defaultAnnotationStyle: AnnotationStyle = { color: '#ff4d57', width: 4, fontSize: 24, filled: false, strength: 12, mode: 'rectangle' }
 export const screenshotColors = ['#ff4d57', '#ffb020', '#ffdf4f', '#20b87c', '#1689ff', '#9c65ef', '#ffffff', '#172333']

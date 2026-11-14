@@ -1,4 +1,6 @@
 .screenshot-studio:has(.screenshot-editor) { padding: 0; overflow: hidden; }
+.screenshot-loading .screenshot-recovery { pointer-events: auto; }
+.screenshot-recovery button { margin-left: 8px; }
 .screenshot-editor { display: flex; flex-direction: column; position: relative; min-width: 0; color: var(--text, #172333); }
 .screenshot-viewport { position: relative; height: clamp(360px, calc(100vh - 340px), 850px); min-height: 260px; overflow: hidden; background: #e9edf2; touch-action: none; user-select: none; cursor: crosshair; }
 [data-theme="dark"] .screenshot-viewport { background: #151a24; }

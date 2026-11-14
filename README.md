@@ -1,6 +1,6 @@
-# DustDesk 1.0.2
+# DustDesk 1.0.3
 
-DustDesk 是一个面向 Windows 的本地桌面工作台。它把任务、便签、项目、链接、快捷启动、剪贴板、桌面整理、截图和系统监控集中到一个轻量的 Electron 应用中，数据保存在本机，适合需要快速记录和整理工作环境的个人用户。
+DustDesk 是一个面向 Windows 的本地桌面工作台。它把任务、便签、项目、链接、快捷启动、剪贴板、桌面整理、截图和系统监控集中到一个 Rust + Tauri 应用中，数据保存在本机，适合需要快速记录和整理工作环境的个人用户。
 
 ## 主要功能
 
@@ -18,7 +18,7 @@ DustDesk 是一个面向 Windows 的本地桌面工作台。它把任务、便�
 
 当前版本包含三个独立侧栏页面：文本工具箱、批量图片工具箱和 DustDesk 电脑间的局域网传输。使用方法、续传数据位置与限制见 [工具箱与局域网传输](docs/TOOLBOX.md)。
 
-环境要求：Windows 10 或更高版本、Node.js 20+。
+开发环境：Windows 10/11 x64、Node.js 20+、Rust stable、Visual Studio C++ 生成工具和 WebView2。使用安装包或绿色版时无需安装 Node.js 或 Rust。
 
 ```powershell
 npm install
@@ -34,7 +34,7 @@ npm run build
 npm run dist
 ```
 
-需要不打扰桌面的检查时，运行 `npm run check:silent`。它执行类型检查、Node 测试、构建和无界面页面测试；测试使用实际 preload、IPC 与持久化代码，模拟系统接口，不启动 Electron 窗口、注册真实快捷键或访问系统剪贴板。无界面页面测试使用已安装的 Chromium、Chrome 或 Edge，也可通过 `DUSTDESK_HEADLESS_BROWSER` 指定浏览器路径；没有可用浏览器时会明确跳过该项。`e2e:*` 命令则会启动真实应用窗口。
+`npm run check:silent` 执行 TypeScript 检查、Node 单元测试、前端构建和 Rust 全目标测试，不启动应用窗口。`npm run build:app -- --debug` 生成可运行的 Tauri 开发程序；`npm run e2e` 启动真实 WebView2 窗口验证编辑、保存和退出。测试使用独立临时数据目录。
 
 `dist` 会生成 Windows x64 NSIS 安装包和免安装绿色 ZIP。绿色版解压后运行 `DustDesk.exe`，保留压缩包内的全部文件；数据继续保存在下方所列的默认工作区目录。发布规则见 [开发与发布规范](docs/DEVELOPMENT.md)。
 
@@ -43,10 +43,10 @@ npm run dist
 默认工作区数据位于：
 
 ```text
-%AppData%\DustDesk.Next\Data\workspace.json
+DustDesk.exe 所在目录\Data\workspace.json
 ```
 
-同一目录还可能包含备份、回收站、便签背景图片、剪贴板图片和截图。应用启动时会兼容旧版工作区字段，并在需要时保留恢复点。
+开发模式使用项目根目录下的 `Data`，安装版和绿色版使用 `DustDesk.exe` 同级的 `Data`，不受启动时工作目录影响。程序目录须可写；移动绿色版时一起移动 `Data`。同一目录还可能包含备份、回收站、便签背景图片、剪贴板图片和截图。应用启动时会兼容旧版工作区字段，并在需要时保留恢复点。
 
 剪贴板图片存放在 `ClipboardImages` 中，工作区只保存图片引用；旧版内嵌图片会在首次读取时自动迁移。备份仍内嵌图片，可独立恢复。迁移后的工作区格式为版本 3，旧版应用会拒绝打开，请通过应用的备份功能导出数据。图片文件暂时保留，以保证 `.bak` 和恢复点中的引用可用。
 
@@ -61,31 +61,32 @@ npm run dist
 
 ## 技术栈
 
-- Electron 37、React 19、TypeScript 5
-- Vite / electron-vite
-- Radix UI、Lucide React、systeminformation
-- Windows Shell、系统托盘、全局快捷键和原生窗口能力
+- Rust、Tauri 2、系统 WebView2
+- React 19、TypeScript 5、Vite
+- Radix UI、Lucide React、Windows 原生窗口、托盘与快捷键
 
-渲染进程启用 `contextIsolation` 和 `sandbox`，关闭 `nodeIntegration`，所有系统能力都通过类型化 preload API 暴露。
+页面通过类型化 `DustDeskApi` 访问 Rust 服务。原生权限按主窗口、小组件、截图、贴图和快速记录分别授予；不开放任意执行或通用文件读写。
 
 ## 项目结构
 
 ```text
-src/main       Electron 主进程、窗口、IPC 和系统能力
-src/preload    渲染进程可用的类型化 API
-src/renderer   React 页面、组件、工作台和小组件
-src/shared     主进程与渲染进程共享的类型和业务模型
-tests          单元、回归和 Electron 测试
-docs           设计与重构记录
+src-tauri       Rust 应用、存储、窗口和 Windows 系统能力
+src/renderer    原有 React 页面、小组件、样式和浏览器 Worker
+src/shared      TypeScript 类型与业务模型
+scripts         构建与 Windows 安装包、绿色 ZIP 打包
+tests           单元测试、原生 Tauri 回归与历史行为对照
+docs            开发规范和迁移记录
 ```
 
-## 项目状态
+## 当前分支
 
-当前主线版本为 **1.0.2**。核心工作台、数据保存、备份恢复、桌面整理、截图、小组件、工具箱和回归测试已经纳入 Electron 主线，项目仍会继续迭代。
+`v1.0.3` 为 Rust + Tauri 2 框架的正式版本，`main` 同步该发布基线；后续开发从本地 `v1.0.4` 分支继续。`v1.0.1`、`v1.0.2` 的标签与已发布内容保持不变。框架变更和升级步骤见 [v1.0.3 版本说明](docs/releases/v1.0.3.md)。
 
-本版本的修复、新增功能与兼容性说明见 [v1.0.2 更新说明](docs/releases/v1.0.2.md)。开发、版本编号与发布介绍统一遵循 [开发与发布规范](docs/DEVELOPMENT.md)；未指定发布版本时默认递增补丁号，例如 `v1.0.0 → v1.0.1 → v1.0.2`。
+当前分支直接以 Rust + Tauri 替换 Electron，默认开发、构建和运行入口均为 Tauri。产品源码不包含 Electron 主进程或 preload，npm 不再安装 Electron、electron-vite 或 electron-builder。`tests/reference` 中保留的旧 TypeScript 代码只供模拟系统接口的行为对照测试使用，不打入应用，也不启动 Electron。
 
-设置和托盘只提供“检查更新”，从 [当前项目的 GitHub Releases](https://github.com/Xu-qingsong/DustDesk-Next/releases) 读取最新正式版本。发现新版本时显示版本号及 Release 更新说明，确认后打开对应版本的发布页面下载；不会自动下载、安装或退出应用。发布时使用 `v1.2.3` 这样的版本标签，并同步修改 `package.json` 中的版本号。项目主页和问题反馈均指向本仓库。
+迁移保持原有界面、操作方式、工作区 JSON 格式与功能范围。工作区默认位于本地 `Data`；旧 `%AppData%\DustDesk.Next\Data` 不会自动覆盖本地目录，可通过备份恢复导入旧工作区。局域网身份继续使用已存在的原用户配置目录，避免生成另一设备身份。自动创建默认工作区仅发生在首次使用且没有工作区或备份时；损坏、丢失和未完成恢复会保留原文件并阻断编辑。
+
+安装包和绿色版均使用系统 WebView2。开发测试入口与正式应用入口分开，原型窗口仅允许 Debug 构建打开。构建和运行检查进度见 [迁移执行记录](docs/TAURI_MIGRATION_PROGRESS.md)，历史记录不代表当前源码的验收结果。
 
 ## 许可与致谢
 

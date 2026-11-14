@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "widget-manager"
+description = "Main workspace widget layout and native window management."
+commands.allow = ["widgets_visibility", "widgets_set", "widgets_options", "widgets_geometry", "widgets_presets"]

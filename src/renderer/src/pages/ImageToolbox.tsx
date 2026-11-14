@@ -12,6 +12,7 @@ import { ImagePreviewSession, type ImageResult } from '../toolbox/imagePreview'
 import { fileSize } from '../toolbox/format'
 import { portraitPresets, centeredCrop } from '../../../shared/imagePresets'
 import { CropPreview } from '../toolbox/CropPreview'
+import { useFilesDropped } from '../hooks/useFilesDropped'
 
 interface Item { asset: ToolAsset; status: 'waiting' | 'processing' | 'ready' | 'failed' | 'exported'; thumbnail?: string; error?: string; original?: { width: number; height: number; format: ImageResult['originalFormat'] }; result?: { width: number; height: number; size: number; retainedOriginal: boolean } }
 function sizeChange(item: Item) {
@@ -24,6 +25,7 @@ function sizeChange(item: Item) {
 }
 interface ImageTask { cancelled: boolean }
 export function ImageToolbox({ active }: { active: boolean }) {
+  const dropTarget = useRef<HTMLDivElement>(null)
   const [items, setItems] = useState<Item[]>([]), [options, setOptions] = useState<ImageOptions>({ ...defaultImageOptions }), [selected, setSelected] = useState('')
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [category, setCategory] = useState<'general' | 'avatar' | 'portrait'>('general')
@@ -123,11 +125,11 @@ export function ImageToolbox({ active }: { active: boolean }) {
     }
   }
   const importFiles = (files: File[]) => runOperation('importing', async task => {
-    const paths = window.dustdesk.getDroppedPaths(files)
+    const paths = '__TAURI_INTERNALS__' in window ? [] : window.dustdesk.getDroppedPaths(files)
     if (paths.length === files.length) await addImages(task, await window.dustdesk.toolbox.registerPaths(paths, 'image'))
     else for (const file of files) {
       checkTask(task)
-      const [filePath] = window.dustdesk.getDroppedPaths([file])
+      const [filePath] = '__TAURI_INTERNALS__' in window ? [] : window.dustdesk.getDroppedPaths([file])
       if (filePath) await addImages(task, await window.dustdesk.toolbox.registerPaths([filePath], 'image'))
       else {
         const bytes = new Uint8Array(await file.arrayBuffer()); checkTask(task)
@@ -135,6 +137,7 @@ export function ImageToolbox({ active }: { active: boolean }) {
       }
     }
   })
+  useFilesDropped(dropTarget, active && !busy && !importing, paths => { void runOperation('importing', async task => { await addImages(task, await window.dustdesk.toolbox.registerPaths(paths, 'image')) }) })
   useEffect(() => {
     if (!active) return
     const paste = (event: ClipboardEvent) => { if (taskRef.current || (event.target instanceof Element && event.target.closest('input,textarea'))) return; const files = [...(event.clipboardData?.items ?? [])].filter(item => item.type.startsWith('image/')).map(item => item.getAsFile()).filter((f): f is File => !!f); if (files.length) { event.preventDefault(); void importFiles(files) } }
@@ -227,7 +230,7 @@ export function ImageToolbox({ active }: { active: boolean }) {
     || (options.format === 'original' && (!items.length || items.some(item => item.original?.format !== 'png')))
   const showJpegBackground = options.format === 'jpeg'
     || (options.format === 'original' && (!items.length || items.some(item => !item.original || item.original.format === 'jpeg')))
-  return <div className="toolbox-page" onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }} onDrop={event => { event.preventDefault(); if (!busy && !importing) void importFiles([...event.dataTransfer.files]) }}><div className="image-tool-topbar">
+  return <div ref={dropTarget} className="toolbox-page" onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }} onDrop={event => { event.preventDefault(); if (active && !busy && !importing) void importFiles([...event.dataTransfer.files]) }}><div className="image-tool-topbar">
     <div className="toolbox-tabs" role="tablist" aria-label="图片工具分类">{([['general','通用处理'],['avatar','头像裁剪'],['portrait','证件照尺寸']] as const).map(([value,label])=><button key={value} role="tab" aria-selected={category===value} className={category===value?'primary-button':'secondary-button'} disabled={busy||importing} onClick={()=>switchCategory(value)}>{label}</button>)}</div><div className="toolbox-actions"><button className="secondary-button" disabled={busy || importing} onClick={() => void pasteImage()}><ClipboardPaste size={15} />粘贴图片</button><button className="primary-button" disabled={busy || importing} onClick={() => void pick()}><ImagePlus size={15} />导入图片</button></div></div>
     <div className="image-tool-layout"><Panel><fieldset className="toolbox-fieldset" disabled={busy || importing}>{category!=='general'&&<><h3>{category==='avatar'?'头像快捷裁剪':'证件照快捷尺寸'}</h3>{category==='avatar'?<div className="toolbox-option-grid"><label>形状<Select aria-label="头像形状" value={options.avatarShape||'square'} onValueChange={value=>change('avatarShape',value as 'square'|'circle')}><option value="square">方形</option><option value="circle">圆形（透明 PNG）</option></Select></label><label>尺寸<Select aria-label="头像尺寸" value={options.width} onValueChange={value=>{setOptions(current=>({...current,width:+value,height:+value}));setItems(current=>current.map(item=>({...item,result:undefined,status:'waiting'})))}}>{[128,256,512,1024].map(size=><option key={size} value={size}>{size}×{size} px</option>)}</Select></label></div>:<><label>证件照规格<Select aria-label="证件照规格" value={options.preset||'one'} onValueChange={value=>{const preset=portraitPresets.find(item=>item.id===value)!;setOptions(current=>({...current,preset:value,width:preset.width,height:preset.height}));setItems(current=>current.map(item=>({...item,result:undefined,status:'waiting'})))}}>{portraitPresets.map(preset=><option key={preset.id} value={preset.id}>{preset.name} · {preset.mmWidth}×{preset.mmHeight} mm</option>)}</Select></label><p className="muted">{options.width}×{options.height} px · 300 DPI</p></>}<p className="muted">拖动预览调整构图，方向键移动，加减键缩放。快捷尺寸允许放大小图，可能降低清晰度。</p><label>缩放 · {(crops[`${category}:${selected}`]?.zoom||1).toFixed(2)}×<Slider aria-label="裁剪缩放" min="1" max="8" step="0.01" value={crops[`${category}:${selected}`]?.zoom||1} disabled={!selected||busy||importing} onChange={event=>changeCrop({...crops[`${category}:${selected}`]||centeredCrop,zoom:+event.target.value})}/></label><button className="secondary-button" disabled={!selected||busy||importing} onClick={()=>changeCrop({...centeredCrop})}>重置构图</button></>}
 <h3>输出设置</h3><div className="toolbox-option-grid"><label>格式<Select aria-label="格式" disabled={busy || importing || (category === 'avatar' && options.avatarShape === 'circle')} value={category === 'avatar' && options.avatarShape === 'circle' ? 'png' : options.format} onValueChange={value => change('format', value as ImageOptions['format'])}><option value="original">保持原格式</option><option value="png">PNG（无损）</option><option value="jpeg">JPG</option><option value="webp">WebP</option></Select></label>{showQuality && <label>有损质量 · {options.quality}<Slider min="1" max="100" value={options.quality} onChange={e => change('quality', +e.target.value)} aria-label="有损质量" disabled={busy || importing} /></label>}{category=== 'general' && <label>尺寸调整<Select aria-label="尺寸调整" disabled={busy || importing} value={options.resize} onValueChange={value => change('resize', value as ImageOptions['resize'])}><option value="none">保持原尺寸</option><option value="percent">按比例</option><option value="dimensions">指定尺寸</option></Select></label>}{showJpegBackground && <label>JPG 背景<ColorPicker value={options.background} onValueChange={nextValue => change('background', nextValue)} aria-label="JPG 背景" disabled={busy || importing} /></label>}

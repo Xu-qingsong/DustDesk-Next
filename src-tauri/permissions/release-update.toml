@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "release-update"
+description = "Main-only shared GitHub release check with a native confirmation; no renderer URL, download, or install command."
+commands.allow = ["release_check"]

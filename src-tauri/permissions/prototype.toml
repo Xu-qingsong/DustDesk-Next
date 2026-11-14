@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "prototype-events"
+description = "Private own-window allowlisted prototype event channels; no generic event listening."
+commands.allow = ["prototype_event_attach", "prototype_event_detach"]
+
+[[permission]]
+identifier = "prototype"
+description = "Isolated native migration probes; each command also verifies its caller."
+commands.allow = ["prototype_diagnostics", "prototype_open_window", "prototype_control_window", "prototype_capture_region", "prototype_read_capture", "prototype_capture_window", "prototype_update_capture", "prototype_restore_windows", "prototype_quit", "prototype_open_workspace", "prototype_workspace_initialize", "prototype_workspace_load", "prototype_workspace_save", "prototype_workspace_image"]

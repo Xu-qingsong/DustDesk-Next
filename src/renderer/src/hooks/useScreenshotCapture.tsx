@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { Image } from 'lucide-react'
 import { useDialogFocus } from './useDialogFocus'
 
 type CaptureMode = 'Region' | 'Window' | 'FullScreen'
@@ -66,7 +67,7 @@ export function useScreenshotCapture(onCaptured?: (dataUrl: string) => void) {
     <div className="library-modal screenshot-window-picker" role="dialog" aria-modal="true" aria-labelledby="screenshot-window-title">
       <div className="modal-header"><h3 id="screenshot-window-title">选择截图窗口</h3></div>
       <div className="screenshot-window-list">{sources.map(source => <button type="button" key={source.id} className="screenshot-window-choice" onClick={() => choose(source.id)} title={source.name}>
-        <img src={source.thumbnail} alt="" /><span>{source.name || '未命名窗口'}</span>
+        {source.thumbnail ? <img src={source.thumbnail} alt="" /> : <Image className="screenshot-window-placeholder" size={32} aria-hidden />}<span>{source.name || '未命名窗口'}</span>
       </button>)}</div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => choose()}>取消</button></div>
     </div>

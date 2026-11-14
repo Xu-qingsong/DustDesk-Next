@@ -10,3 +10,6 @@ release/
 .vite/
 test-artifacts/
 electron/
+src-tauri/target/
+src-tauri/gen/
+/Data/

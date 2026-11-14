@@ -12,7 +12,7 @@ async function iconsModule(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dustdesk-resource-test-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const file = path.join(root, 'icons.mjs')
-  const source = await fs.readFile('src/main/windowsIcons.ts', 'utf8')
+  const source = await fs.readFile('tests/reference/src/main/windowsIcons.ts', 'utf8')
   await fs.writeFile(file, ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText)
   return { root, ...await import(pathToFileURL(file).href) }
 }

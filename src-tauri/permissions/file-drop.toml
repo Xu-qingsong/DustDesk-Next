@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "file-drop"
+description = "Receive physical file drops through a main-window-bound channel"
+commands.allow = ["file_drop_attach", "file_drop_detach"]

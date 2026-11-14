@@ -1,0 +1,158 @@
+{
+  "RecycleBin": [],
+  "OrganizerRules": [],
+  "FocusSessions": [],
+  "ActiveFocus": null,
+  "SchemaVersion": 3,
+  "LegacyImportCompleted": false,
+  "QuickNote": "",
+  "Settings": {
+    "AutomaticBackupEnabled": true,
+    "BackupRetentionDays": 30,
+    "QuickCaptureHotKey": "Ctrl+Shift+Space",
+    "MainWindowDisplayName": "DustDesk",
+    "StartHiddenToTray": false,
+    "StartWithWindows": false,
+    "SidebarHidden": [
+      "textTools",
+      "imageTools",
+      "lan"
+    ],
+    "MainWindowHotKey": "Ctrl+Shift+K",
+    "DesktopWidgetsHotKey": "Ctrl+Shift+D",
+    "ScreenshotHotKey": "Ctrl+Shift+S",
+    "PinScreenshotHotKey": "F3",
+    "ScreenshotFormat": "png",
+    "ScreenshotSaveDirectory": "",
+    "ScreenshotDelaySeconds": 0,
+    "ScreenshotAfterAction": "edit",
+    "ScreenshotAutoCopy": true,
+    "ScreenshotAutoAddToClipboardHistory": true,
+    "PinnedImageTopmost": true,
+    "PinnedImageOpacityPercent": 100,
+    "PinnedImageMouseThrough": false,
+    "WidgetOpacityPercent": 86,
+    "WidgetBackgroundColorArgb": -1,
+    "SearchDesktopFiles": true,
+    "SearchAppData": true,
+    "SearchStartMenuApps": true,
+    "SearchProjectPaths": true,
+    "SearchCustomPaths": true,
+    "SearchCustomRoots": [],
+    "ClipboardMonitoringEnabled": true,
+    "DesktopHotKeyWidgetKeys": [
+      "organizer"
+    ],
+    "LauncherWidgetSnapToEdges": false,
+    "LauncherWidgetShowNames": true,
+    "LauncherWidgetIconSize": 48,
+    "OrganizerWidgetShowNames": false,
+    "OrganizerWidgetIconSize": 48,
+    "MonitorShowDownload": true,
+    "MonitorShowUpload": true,
+    "MonitorShowMemory": true,
+    "MonitorShowCpu": true,
+    "MonitorShowDiskIo": true,
+    "MonitorShowDiskSpace": true,
+    "MonitorShowPing": true,
+    "MonitorShowUptime": true,
+    "WorkdayStartMinutes": 540,
+    "WorkdayEndMinutes": 1080,
+    "MonthlySalary": 0,
+    "PaydayDay": 10,
+    "CountdownFestivalName": "国庆节",
+    "CountdownFestivalMonth": 10,
+    "CountdownFestivalDay": 1,
+    "WidgetPlacements": {},
+    "NoteWidgetPlacements": [],
+    "OrganizerGroupWidgetPlacements": [],
+    "WidgetLayoutPresets": {}
+  },
+  "Todos": [
+    {
+      "Id": "__DUSTDESK_UUID_1__",
+      "Title": "梳理今天最重要的一件事",
+      "Tag": "工作",
+      "Note": "",
+      "IsCompleted": false,
+      "CreatedAt": "__DUSTDESK_NOW__",
+      "CompletedAt": null,
+      "ReminderRepeat": "None"
+    },
+    {
+      "Id": "__DUSTDESK_UUID_2__",
+      "Title": "把临时想法记到快速记录",
+      "Tag": "",
+      "Note": "",
+      "IsCompleted": false,
+      "CreatedAt": "__DUSTDESK_NOW__",
+      "CompletedAt": null,
+      "ReminderRepeat": "None"
+    }
+  ],
+  "TagPresets": [
+    {
+      "Name": "工作",
+      "ColorArgb": -1576078
+    },
+    {
+      "Name": "生活",
+      "ColorArgb": -1427458
+    },
+    {
+      "Name": "重要",
+      "ColorArgb": -4045013
+    }
+  ],
+  "Notes": [
+    {
+      "Id": "__DUSTDESK_UUID_3__",
+      "Title": "快速便签",
+      "Text": "",
+      "ColorArgb": -411768,
+      "FontColorArgb": -1385444,
+      "FontSize": 14,
+      "FontBold": false,
+      "BackgroundImageFileName": "",
+      "ImageOnly": false,
+      "CreatedAt": "__DUSTDESK_NOW__",
+      "UpdatedAt": "__DUSTDESK_NOW__"
+    }
+  ],
+  "Projects": [],
+  "Launchers": [],
+  "LinkGroups": [
+    {
+      "Id": "__DUSTDESK_UUID_4__",
+      "Name": "常用",
+      "Links": []
+    }
+  ],
+  "ClipboardHistory": [],
+  "DesktopCategories": [
+    {
+      "Id": "__DUSTDESK_UUID_5__",
+      "Name": "工作",
+      "IsCollapsed": false,
+      "ItemPaths": []
+    },
+    {
+      "Id": "__DUSTDESK_UUID_6__",
+      "Name": "开发",
+      "IsCollapsed": false,
+      "ItemPaths": []
+    },
+    {
+      "Id": "__DUSTDESK_UUID_7__",
+      "Name": "工具",
+      "IsCollapsed": false,
+      "ItemPaths": []
+    },
+    {
+      "Id": "__DUSTDESK_UUID_8__",
+      "Name": "文件",
+      "IsCollapsed": false,
+      "ItemPaths": []
+    }
+  ]
+}

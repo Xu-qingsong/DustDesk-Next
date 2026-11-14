@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "prototype",
+  "description": "Local isolated migration windows only",
+  "windows": [
+    "main",
+    "probe-widget",
+    "probe-pin",
+    "probe-overlay"
+  ],
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "prototype",
+    "prototype-events"
+  ]
+}

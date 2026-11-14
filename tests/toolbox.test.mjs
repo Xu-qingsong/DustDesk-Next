@@ -9,6 +9,16 @@ import { createHash } from 'node:crypto'
 import { toolboxModules } from './toolbox-fixture.mjs'
 import { readZip } from './zip-files.mjs'
 
+test('a disabled LAN service restores without generating an unused TLS identity', async t => {
+  const { lan, root } = await toolboxModules(t)
+  const storage = path.join(root, 'lazy-lan')
+  const service = lan.createLanService({ storage, downloads: path.join(root, 'downloads'), name: 'lazy', discovery: false, changed() {}, confirmPair: async () => false, confirmReceive: async () => false })
+  t.after(() => service.dispose())
+  await service.restore()
+  assert.equal(service.snapshot().enabled, false)
+  await assert.rejects(fs.access(path.join(storage, 'identity.json')), { code: 'ENOENT' })
+})
+
 async function waitForTransfer(service, id) {
   const deadline = Date.now() + 20000
   while (Date.now() < deadline) {

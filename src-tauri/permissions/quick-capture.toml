@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "quick-capture"
+description = "Quick capture only: own drafts, idempotent capture and private lifecycle channel; no workspace snapshots or general events."
+commands.allow = ["quick_capture_hide", "quick_capture_abort", "quick_capture_committed", "quick_capture_save", "quick_capture_events_attach", "quick_capture_events_detach", "application_flushed", "drafts_checkpoint_ready", "window_release_ready"]

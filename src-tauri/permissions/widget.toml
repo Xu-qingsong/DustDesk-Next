@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "widget"
+description = "Registered widgets only; Rust verifies native window ownership and action scope."
+commands.allow = ["workspace_platform", "workspace_load", "workspace_productivity", "widgets_visibility", "widgets_set", "widgets_options", "widgets_geometry", "application_flushed", "workspace_note_image", "system_open", "system_icon", "system_path_menu", "system_search_files", "system_search_cancel", "system_sample", "clipboard_write", "clipboard_preview", "window_release_ready", "widget_events_attach", "widget_events_detach", "drafts_checkpoint_ready"]

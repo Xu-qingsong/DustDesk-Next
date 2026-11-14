@@ -4,13 +4,11 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { openHotkeySettings } from '../widgets/WidgetPicker'
 import type { WorkspaceState } from '../../../shared/types'
-import type { ActionResult, BackupPreview, OrganizerRule, ProductivityAction } from '../../../shared/productivity'
+import type { ActionResult, BackupPreview, OrganizerRule } from '../../../shared/productivity'
 import { Panel } from './common'
 
-export async function runAction(action: ProductivityAction) {
-  const result = await window.dustdesk.productivity(action)
-  if (!result.ok) throw new Error(result.error ?? '操作失败')
-}
+import { runAction } from '../utils/runAction'
+export { runAction } from '../utils/runAction'
 
 export function useOperation() {
   const [busy, setBusy] = useState(false)

@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFile } from 'node:fs/promises'
 import ts from 'typescript'
+import { draftModuleUrl } from './draft-module.mjs'
 
 const source = await readFile(new URL('../src/renderer/src/widgets/noteDrafts.ts', import.meta.url), 'utf8')
 const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
-const { NoteDraftStore, noteDraftKey, savedNoteDraft } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`)
+const { NoteDraftStore, noteDraftKey, savedNoteDraft } = await import("data:text/javascript;base64," + Buffer.from(js.replace("../../../shared/draftMigration", draftModuleUrl)).toString("base64"))
 const note = { Id: 'one', Title: 'Title', Text: 'saved text' }
 function storage() {
   const values = new Map()
@@ -45,4 +46,19 @@ test('failed writes survive editor switches in memory and keep shutdown blocked 
   failing = false; store.flush()
   assert.deepEqual(JSON.parse(disk.getItem(noteDraftKey('notes', note.Id))), draft)
   assert.deepEqual(new NoteDraftStore(disk).read('notes', note), draft)
+})
+
+test('window reclamation rejects dirty drafts and even clean checkpoints whose storage write failed', () => {
+  const disk = storage(); let failing = false
+  const store = new NoteDraftStore({ getItem: disk.getItem, setItem: (key, value) => { if (failing) throw new Error('disk full'); disk.setItem(key, value) } })
+  assert.equal(store.canRelease(), true)
+  store.write('notes', note.Id, { ...savedNoteDraft(note), text: 'dirty' })
+  assert.equal(store.canRelease(), false)
+  store.write('notes', note.Id, savedNoteDraft(note))
+  assert.equal(store.canRelease(), true)
+  failing = true
+  assert.throws(() => store.write('notes', note.Id, savedNoteDraft(note)), /disk full/)
+  assert.equal(store.canRelease(), false)
+  failing = false; store.flush()
+  assert.equal(store.canRelease(), true)
 })

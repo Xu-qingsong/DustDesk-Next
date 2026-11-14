@@ -2,6 +2,7 @@ import type { ProductivityState, ProductivityAction, ActionResult, BackupPreview
 export type ReminderRepeat = 'None' | 'Daily' | 'Weekdays' | 'Weekly'
 export type ProjectStatus = 'Todo' | 'Doing' | 'Done'
 export type ClipboardContentKind = 'Text' | 'Image'
+export type DesktopPlatform = 'win32' | 'darwin' | 'linux' | 'unsupported'
 
 export interface TodoRecord {
   Id: string
@@ -170,8 +171,9 @@ export interface WorkspaceState extends ProductivityState {
 export interface DustDeskApi {
   toolbox: import('./toolbox').ToolboxApi
   getDroppedPaths(files: File[]): string[]
+  onFilesDropped(callback: (drop: import('./fileDrop').FilesDropped) => boolean): () => void
   selectScreenshotRegion(rect: import('./screenshotDocument').ScreenshotRect, action?: 'edit' | 'copy' | 'save' | 'pin', tool?: import('./screenshotDocument').ScreenshotTool): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
-  createScreenshotDocument(png: Uint8Array): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
+  createScreenshotDocument(source: import('./screenshotDocument').ScreenshotImportSource): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
   readScreenshotDocument(id: string): Promise<{ ok: boolean; payload?: import('./screenshotDocument').ScreenshotPayload; error?: string }>
   finishScreenshot(request: import('./screenshotDocument').ScreenshotFinishRequest): Promise<{ ok: boolean; path?: string; canceled?: boolean; error?: string; pinId?: string; warning?: string }>
   discardScreenshotDocument(id: string): Promise<void>
@@ -205,6 +207,7 @@ export interface DustDeskApi {
   openUrl(url: string): Promise<{ ok: boolean; error?: string }>
   showMainWindow(): Promise<void>
   hideMainWindow(): Promise<void>
+  onMainWindowReleaseCheck(check: () => boolean): () => void
   toggleWidgets(key?: string): Promise<{ visible: boolean }>
   getWidgetVisibility(keys: string[]): Promise<Record<string, boolean>>
   hideWidget(key: string): Promise<{ ok: boolean; error?: string }>
@@ -248,5 +251,5 @@ export interface DustDeskApi {
   onWorkspaceChanged(callback: (state: WorkspaceState) => void): () => void
   onWidgetVisibilityChanged(callback: (key: string, visible: boolean) => void): () => void
   onWidgetAppearance(callback: (appearance: { color: number; alpha: number }) => void): () => void
-  platform: NodeJS.Platform
+  platform: DesktopPlatform
 }

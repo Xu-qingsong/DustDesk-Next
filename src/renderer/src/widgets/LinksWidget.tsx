@@ -4,6 +4,7 @@ import type { LinkGroupRecord } from '../../../shared/types'
 export function LinksWidget({ groups }: { groups: LinkGroupRecord[] }) {
   const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.Id ?? '')
   const selectedGroup = groups.find(group => group.Id === selectedGroupId) ?? groups[0]
+  useEffect(() => window.dustdesk.onMainWindowReleaseCheck(() => selectedGroup?.Id === groups[0]?.Id), [selectedGroup, groups])
 
   useEffect(() => {
     if (!groups.some(group => group.Id === selectedGroupId)) setSelectedGroupId(groups[0]?.Id ?? '')

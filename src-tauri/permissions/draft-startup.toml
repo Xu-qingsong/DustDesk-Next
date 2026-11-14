@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "draft-startup-worker"
+description = "Read and recover the bound browser journal; only native result verification can release startup."
+commands.allow = ["drafts_recovery", "drafts_startup_done"]
+
+[[permission]]
+identifier = "draft-startup-main"
+description = "Wait for startup recovery or explicitly retry the failed native recovery worker."
+commands.allow = ["drafts_startup_wait", "drafts_startup_retry"]

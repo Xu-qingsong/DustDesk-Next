@@ -8,6 +8,17 @@ import type { AnnotationStyle, ScreenshotAction, ScreenshotAnnotation, Screensho
 import { createScreenshotRenderer } from './workerClient'
 import { paintAnnotation } from './render'
 import { resizeCursors, screenshotToolCursors } from './cursors'
+import type { AppSettings, DustDeskApi } from '../../../shared/types'
+
+export interface ScreenshotRuntime {
+  readSettings(): Promise<Pick<AppSettings, 'ScreenshotAfterAction' | 'ScreenshotFormat'>>
+  selectRegion: DustDeskApi['selectScreenshotRegion']
+  finish: DustDeskApi['finishScreenshot']
+}
+export interface ScreenshotCheckpoint {
+  freeze(request: string): void
+  resume(request: string): void
+}
 
 const tools: [ScreenshotTool, string, React.ElementType][] = [['select', '选择标注', MousePointer2], ['crop', '调整选区', Crop], ['pen', '画笔', Pencil], ['highlighter', '高亮', Highlighter], ['line', '直线', Minus], ['arrow', '箭头', ArrowUpRight], ['rectangle', '矩形', Square], ['ellipse', '椭圆', Circle], ['text', '文字', Type], ['number', '序号', Hash], ['mosaic', '马赛克', Grid2X2], ['blur', '模糊', Droplets], ['cover', '实色遮盖', Shield], ['eraser', '删除标注', Eraser]]
 type PointerInput = { clientX: number; clientY: number; button: number; pointerId: number; shiftKey: boolean; target: EventTarget; currentTarget: HTMLDivElement }
@@ -25,7 +36,7 @@ function resizeRect(rect: ScreenshotRect, handle: Handle, delta: ScreenshotPoint
   return { x: left, y: top, width: right - left, height: bottom - top }
 }
 
-export function ScreenshotEditor({ payload, floating = false, liveRegion = false, initialSelection = true, active = true, onCancel, directAction }: { payload: ScreenshotPayload; floating?: boolean; liveRegion?: boolean; initialSelection?: boolean; active?: boolean; onCancel?: () => void; directAction?: 'copy' | 'pin' }) {
+export function ScreenshotEditor({ payload, floating = false, liveRegion = false, initialSelection = true, active = true, onCancel, directAction, runtime, checkpoint }: { payload: ScreenshotPayload; floating?: boolean; liveRegion?: boolean; initialSelection?: boolean; active?: boolean; onCancel?: () => void; directAction?: 'copy' | 'pin'; runtime?: ScreenshotRuntime; checkpoint?: React.RefObject<ScreenshotCheckpoint | null> }) {
   const [doc, setDoc] = useState(payload.document)
   const docRef = useRef(doc)
   const updateDoc = (value: ScreenshotDocument) => { docRef.current = value; setDoc(value) }
@@ -52,6 +63,43 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   const refreshCursor = useRef<() => void>(() => {})
   const [toolbarSize, setToolbarSize] = useState({ width: 700, height: 126 })
   const captureLock = useRef<Promise<void> | null>(null)
+  const editorRoot = useRef<HTMLDivElement>(null), frozenRequest = useRef<string | undefined>(undefined), composing = useRef(false)
+  const [frozen, setFrozen] = useState(false)
+  const focusBeforeFreeze = useRef<{ element: HTMLElement; start?: number | null; end?: number | null; direction?: 'forward' | 'backward' | 'none' | null } | undefined>(undefined)
+  const checkpointControl = useRef<ScreenshotCheckpoint | null>(null)
+  checkpointControl.current = {
+    freeze: request => {
+      if (frozenRequest.current) { if (frozenRequest.current === request) return; throw Error('截图编辑器已在等待另一检查点') }
+      if (!ready || busy || actionLock.current || captureLock.current || sourceLoading.current || gesture.current || composing.current) throw Error('截图正在捕获、输出、拖动或组合输入，请完成后重试')
+      const element = document.activeElement
+      if (document.querySelector('[data-control-popup]') || element instanceof HTMLElement && element.matches('input,select,[contenteditable="true"]')) throw Error('请先完成截图控件输入或关闭弹出控件后重试')
+      focusBeforeFreeze.current = element instanceof HTMLElement && editorRoot.current?.contains(element) ? {
+        element, ...(element instanceof HTMLTextAreaElement ? { start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection } : {})
+      } : undefined
+      // Keep the complete live editor in place: text drafts, selection, undo,
+      // redo, viewport and worker/source identity. No output or draft is written.
+      frozenRequest.current = request; space.current = false
+      if (editorRoot.current) editorRoot.current.inert = true
+      setFrozen(true)
+    },
+    resume: request => {
+      if (frozenRequest.current !== request) return
+      frozenRequest.current = undefined
+      if (editorRoot.current) editorRoot.current.inert = false
+      setFrozen(false)
+      const saved = focusBeforeFreeze.current; focusBeforeFreeze.current = undefined
+      if (saved?.element.isConnected) {
+        saved.element.focus({ preventScroll: true })
+        if (saved.element instanceof HTMLTextAreaElement && saved.start != null && saved.end != null) saved.element.setSelectionRange(saved.start, saved.end, saved.direction ?? undefined)
+      }
+    }
+  }
+  useLayoutEffect(() => {
+    if (!checkpoint) return
+    const control: ScreenshotCheckpoint = { freeze: request => checkpointControl.current!.freeze(request), resume: request => checkpointControl.current!.resume(request) }
+    checkpoint.current = control
+    return () => { if (checkpoint.current === control) checkpoint.current = null }
+  }, [checkpoint])
   const nativeScale = 1 / (window.devicePixelRatio || 1)
   const placement = floating ? payload.placement : undefined
   const scale = zoom ?? (placement ? placement.width / doc.width : Math.min(size.width / doc.width, size.height / doc.height, floating ? Infinity : nativeScale))
@@ -61,7 +109,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   const hasSelection = Boolean(crop)
   const toolCursor = busy || !ready ? 'progress' : screenshotToolCursors[hasSelection ? tool : 'crop']
   const [liveDirect, setLiveDirect] = useState<'copy' | 'pin'>()
-  useEffect(() => { void window.dustdesk.loadWorkspace().then(state => { if (liveRegion && ['copy', 'pin'].includes(state.Settings.ScreenshotAfterAction)) setLiveDirect(state.Settings.ScreenshotAfterAction as 'copy' | 'pin'); if (state.Settings.ScreenshotFormat === 'jpg' || state.Settings.ScreenshotFormat === 'jpeg') setFormat('jpg') }).catch(() => {}) }, [])
+  useEffect(() => { void (runtime ? runtime.readSettings() : window.dustdesk.loadWorkspace().then(state => state.Settings)).then(settings => { if (liveRegion && ['copy', 'pin'].includes(settings.ScreenshotAfterAction)) setLiveDirect(settings.ScreenshotAfterAction as 'copy' | 'pin'); if (settings.ScreenshotFormat === 'jpg' || settings.ScreenshotFormat === 'jpeg') setFormat('jpg') }).catch(() => {}) }, [])
 
   useLayoutEffect(() => {
     const observer = new ResizeObserver(() => {
@@ -153,8 +201,10 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
     const task = (async () => {
       setError('')
       try {
+        while (gesture.current && generation === epoch.current) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+        if (generation !== epoch.current) throw Error('截图已取消')
         const ratio = current.width / payload.placement!.width
-        const result = await window.dustdesk.selectScreenshotRegion({ x: crop.x / ratio, y: crop.y / ratio, width: crop.width / ratio, height: crop.height / ratio })
+        const result = await (runtime ? runtime.selectRegion : window.dustdesk.selectScreenshotRegion)({ x: crop.x / ratio, y: crop.y / ratio, width: crop.width / ratio, height: crop.height / ratio })
         if (generation !== epoch.current) throw Error('截图已取消')
         if (!result.ok || !result.payload) throw Error(result.error || '无法捕获选区，请重试')
         const editing = docRef.current
@@ -187,13 +237,14 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   }
 
   const commit = (next: ScreenshotDocument, before = docRef.current) => {
+    if (frozenRequest.current) return
     const value = { ...next, revision: before.revision + 1 }
     const edit = documentEdit(before, value)
     if (!edit.changes.length && JSON.stringify(edit.beforeCrop) === JSON.stringify(edit.afterCrop) && edit.beforeNumber === edit.afterNumber) return
     setHistory(items => [...items, edit].slice(-100)); setRedo([]); updateDoc(value); docRef.current = value
   }
   const undo = (forward = false) => {
-    if (busy || text || gesture.current) return
+    if (frozenRequest.current || busy || text || gesture.current) return
     const stack = forward ? redo : history, edit = stack.at(-1)
     if (!edit) return
     const value = applyDocumentEdit(docRef.current, edit, !forward)
@@ -203,23 +254,25 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   }
   const removeSelected = () => { if (selected) { commit({ ...docRef.current, annotations: docRef.current.annotations.filter(a => a.id !== selected) }); setSelected(undefined) } }
   const changeStyle = (patch: Partial<AnnotationStyle>) => {
+    if (frozenRequest.current) return
     setStyle(current => ({ ...current, ...patch }))
     if (selected) commit({ ...docRef.current, annotations: docRef.current.annotations.map(a => a.id === selected ? { ...a, style: { ...a.style, ...patch } } : a) })
     if (text) setText({ ...text, annotation: { ...text.annotation, style: { ...text.annotation.style, ...patch } } })
   }
   const finishText = () => {
-    if (!text) return
+    if (frozenRequest.current || !text) return
     const old = docRef.current.annotations.find(a => a.id === text.annotation.id)
     const annotation = { ...text.annotation, text: text.draft.slice(0, 5000) }
     if (text.draft.trim()) commit({ ...docRef.current, annotations: old ? docRef.current.annotations.map(a => a.id === old.id ? annotation : a) : [...docRef.current.annotations, annotation] })
     setText(null)
   }
   const cancelGesture = () => {
+    if (frozenRequest.current) return
     if (gesture.current) { updateDoc(gesture.current.before); updateCrop(gesture.current.cropBefore ?? (gesture.current.cropBefore === null ? null : gesture.current.before.crop)); if (gesture.current.type === 'pan') setPan(gesture.current.pan!); gesture.current = null }
     updateCursor()
   }
   const finish = async (action: ScreenshotAction, override?: ScreenshotDocument) => {
-    if (actionLock.current || !ready || text || gesture.current || !cropRef.current || !renderer.current || !floating && JSON.stringify(cropRef.current) !== JSON.stringify(docRef.current.crop)) return
+    if (frozenRequest.current || actionLock.current || !ready || text || gesture.current || !cropRef.current || !renderer.current || !floating && JSON.stringify(cropRef.current) !== JSON.stringify(docRef.current.crop)) return
     actionLock.current = true; setBusy(true); setError(''); setMessage('')
     const generation = epoch.current
     try {
@@ -230,7 +283,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
       // Save As can choose JPEG independently of the current format dropdown.
       const jpeg = action === 'saveAs' || action === 'save' && format === 'jpg' ? (await renderer.current.render(current, undefined, true, 'jpg')).bytes : undefined
       if (generation !== epoch.current) return
-      const output = await window.dustdesk.finishScreenshot({ requestId: crypto.randomUUID(), document: current, action, png: result.bytes, jpeg, format })
+      const output = await (runtime ? runtime.finish : window.dustdesk.finishScreenshot)({ requestId: crypto.randomUUID(), document: current, action, png: result.bytes, jpeg, format })
       if (!output.ok && !output.canceled) throw Error(output.error || '操作失败，请重试')
       if (output.ok) setMessage([output.path ? `已保存：${output.path}` : action === 'copy' ? '已复制编辑结果' : action === 'updatePin' ? '贴图已更新' : '操作完成', output.warning].filter(Boolean).join('；'))
     } catch (err) { if (generation === epoch.current) setError(err instanceof Error ? err.message : '导出失败，请重试') }
@@ -240,6 +293,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   useEffect(() => { if (ready && payload.initialAction && !initialActionStarted.current) { initialActionStarted.current = true; void finish(payload.initialAction) } }, [ready])
   const keyboard = useRef<(event: KeyboardEvent) => void>(() => {}), keyboardBlur = useRef<() => void>(() => {})
   keyboard.current = (event: KeyboardEvent) => {
+      if (frozenRequest.current) return
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.target instanceof HTMLElement && event.target.closest('[data-control-popup], [data-control-trigger]')) return
       const input = event.target instanceof HTMLElement && (event.target.matches('input,textarea,select') || event.target.isContentEditable)
@@ -318,7 +372,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
     updateCursor(event)
   }
   const down = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (busy || gesture.current || captureLock.current && (tool === 'crop' || !cropRef.current)) return
+    if (frozenRequest.current || busy || gesture.current || captureLock.current && (tool === 'crop' || !cropRef.current)) return
     const input: PointerInput = { clientX: event.clientX, clientY: event.clientY, button: event.button, pointerId: event.pointerId, shiftKey: event.shiftKey, target: event.target as HTMLElement, currentTarget: event.currentTarget }
     if (!liveRegion || tool === 'crop' || !cropRef.current || tool === 'select' || tool === 'eraser' || event.button !== 0 || space.current) { begin(input); return }
     setHasPixels(true); begin(input)
@@ -327,6 +381,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
     void ensureSource().catch(err => { setError(err instanceof Error ? err.message : '无法捕获选区') })
   }
   const move = (event: PointerInput) => {
+    if (frozenRequest.current) return
     updateCursor(event)
     const g = gesture.current; if (!g) return
     if (g.type === 'pan') { setPan({ x: g.pan!.x + event.clientX - g.start.x, y: g.pan!.y + event.clientY - g.start.y }); return }
@@ -348,6 +403,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
     }
   }
   const up = (event: PointerInput) => {
+    if (frozenRequest.current) return
     if (gesture.current) move(event)
     const g = gesture.current; gesture.current = null; if (!g) return
     updateCursor(event)
@@ -364,7 +420,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   }
   const rectStyle = (rect: ScreenshotRect): React.CSSProperties => ({ left: offset.x + rect.x * scale, top: offset.y + rect.y * scale, width: rect.width * scale, height: rect.height * scale })
   const zoomAt = (value: number, center = { x: size.width / 2, y: size.height / 2 }) => {
-    if (captureLock.current) return
+    if (frozenRequest.current || captureLock.current) return
     const next = Math.max(.05, Math.min(8, value))
     const px = (center.x - offset.x) / scale, py = (center.y - offset.y) / scale
     setZoom(next); setPan({ x: center.x - px * next - (size.width - doc.width * next) / 2, y: center.y - py * next - (size.height - doc.height * next) / 2 })
@@ -373,7 +429,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   const wheelHandler = useRef<(event: WheelEvent) => void>(() => {})
   wheelHandler.current = (event: WheelEvent) => {
       event.preventDefault()
-      if (busy) return
+      if (frozenRequest.current || busy) return
       const rect = host.current!.getBoundingClientRect()
       zoomAt(scale * (event.deltaY > 0 ? .9 : 1.1), { x: event.clientX - rect.left, y: event.clientY - rect.top })
     }
@@ -391,7 +447,7 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
   const activeStyle = selectedAnnotation?.style || text?.annotation.style || style
   const pendingCrop = !floating && crop && JSON.stringify(crop) !== JSON.stringify(doc.crop)
   const button = (label: string, Icon: React.ElementType, action: () => void, disabled = false) => <button type="button" title={label} aria-label={label} disabled={busy || !ready || disabled} onClick={action}><Icon size={16} /></button>
-  return <div className={`screenshot-editor ${floating ? 'floating' : ''} ${liveRegion ? 'region-live-selector' : ''}`} aria-busy={busy}>
+  return <><div ref={editorRoot} inert={frozen} data-checkpoint={frozen ? 'frozen' : undefined} className={`screenshot-editor ${floating ? 'floating' : ''} ${liveRegion ? 'region-live-selector' : ''}`} aria-busy={busy || frozen} onCompositionStartCapture={() => { composing.current = true }} onCompositionEndCapture={() => { composing.current = false }}>
     <div className="screenshot-viewport" ref={host} style={{ cursor: toolCursor }} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancelGesture} onLostPointerCapture={() => { if (gesture.current) cancelGesture() }} onDoubleClick={event => {
       if (busy || text || tool !== 'select') return
       const found = [...doc.annotations].reverse().find(a => a.kind === 'text' && hitAnnotation(a, point(event), 6 / scale))
@@ -429,5 +485,5 @@ export function ScreenshotEditor({ payload, floating = false, liveRegion = false
       </div>
     </div>}
     <div className="screenshot-feedback" aria-live="polite">{error ? <span role="alert">{error}</span> : busy ? captureLock.current ? '正在捕获选区…' : '正在合成图像…' : !ready ? '正在读取图片…' : !crop ? '拖动框选区域 · Esc 取消' : message || (floating ? 'Enter 复制并结束 · Esc 取消' : '拖入图片或粘贴剪贴板图片 · 双击文字再次编辑')}</div>
-  </div>
+  </div>{frozen && <div className="screenshot-feedback" role="status">截图编辑已暂停，正在等待维护或退出检查…</div>}</>
 }

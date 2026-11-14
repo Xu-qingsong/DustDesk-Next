@@ -10,9 +10,9 @@ const require = createRequire(import.meta.url)
 
 // Compile the real main-process implementation, replacing only native/system
 // boundaries. No Electron process, desktop window, shortcut or clipboard access.
-export async function mainFixture(t, { screenshotWindows = false, widgetWindows = false } = {}) {
+export async function mainFixture(t, { screenshotWindows = false, widgetWindows = false, realSpreadsheets = false } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dustdesk-headless-'))
-  const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url))
+  const sourceRoot = fileURLToPath(new URL('./reference/src/', import.meta.url))
   const data = path.join(root, 'data')
   const handlers = new Map()
   const ipcMain = Object.assign(new EventEmitter(), { handle: (name, handler) => handlers.set(name, handler) })
@@ -25,6 +25,7 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
   })
   const virtualWindows = []
   let shutdownWidgets = () => {}
+  let releaseOwnership = async () => {}
   class ForbiddenWindow {
     constructor(options) {
       if (!screenshotWindows && !widgetWindows) throw Error('Headless tests must never create a native window')
@@ -55,24 +56,29 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     net: { fetch: async () => new Response(JSON.stringify({ tag_name: 'v1.0.0', body: '已发布版本' }), { status: 200 }) }
   }
   const fileSystem = { ...nodeFs.promises }
-  const childProcess = { execFile: () => { throw Error('System processes are forbidden in headless tests') } }
+  const childProcess = {
+    execFile: () => { throw Error('System processes are forbidden in headless tests') },
+    spawn: () => { throw Error('System processes are forbidden in headless tests') }
+  }
   const key = crypto.randomUUID()
   const fixtures = globalThis.__dustdeskHeadlessFixtures ??= new Map()
-  fixtures.set(key, { electron, fileSystem, childProcess, existsSync: nodeFs.existsSync, readFileSync: nodeFs.readFileSync, createReadStream: nodeFs.createReadStream, createWriteStream: nodeFs.createWriteStream })
+  fixtures.set(key, { electron, fileSystem, childProcess, existsSync: nodeFs.existsSync, lstatSync: nodeFs.lstatSync, readFileSync: nodeFs.readFileSync, createReadStream: nodeFs.createReadStream, createWriteStream: nodeFs.createWriteStream })
   t.after(async () => {
     shutdownWidgets()
+    await releaseOwnership()
     for (const window of virtualWindows) if (window.options && !window.isDestroyed()) window.destroy()
     fixtures.delete(key)
     await fs.rm(root, { recursive: true, force: true })
   })
   const mocks = {
-    electron: 'export const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, screen, shell, Tray } = fixture.electron;',
-    'node:fs': 'export const promises = fixture.fileSystem; export const existsSync = fixture.existsSync; export const readFileSync = fixture.readFileSync; export const createReadStream = fixture.createReadStream; export const createWriteStream = fixture.createWriteStream;',
-    'node:child_process': 'export function execFile(...args) { return fixture.childProcess.execFile(...args) }',
+    electron: 'export const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, net, Notification, powerMonitor, screen, session, shell, Tray } = fixture.electron;',
+    'node:fs': 'export const promises = fixture.fileSystem; export const existsSync = fixture.existsSync; export const lstatSync = fixture.lstatSync; export const readFileSync = fixture.readFileSync; export const createReadStream = fixture.createReadStream; export const createWriteStream = fixture.createWriteStream;',
+    'node:child_process': 'export function execFile(...args) { return fixture.childProcess.execFile(...args) } export function spawn(...args) { return fixture.childProcess.spawn(...args) }',
     systeminformation: 'export default { currentLoad: async () => ({ currentLoad: 5 }), mem: async () => ({ total: 1000, available: 500 }), fsSize: async () => [], networkStats: async () => [], inetLatency: async () => -1, time: () => ({ uptime: 60 }) };',
     xlsx: 'export const utils = {}; export function writeFile() { throw Error("Spreadsheet export is not mocked") }'
   }
   const mockUrls = new Map()
+  if (realSpreadsheets) delete mocks.xlsx
   for (const [name, body] of Object.entries(mocks)) {
     const target = path.join(root, `mock-${mockUrls.size}.mjs`)
     await fs.writeFile(target, `const fixture = globalThis.__dustdeskHeadlessFixtures.get(${JSON.stringify(key)});\n${body}`)
@@ -86,7 +92,8 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     compiled.set(sourcePath, url)
     let source = await fs.readFile(sourcePath, 'utf8')
     if (sourcePath === path.join(sourceRoot, 'main', 'index.ts')) {
-      source += '\nexport { registerIpc, restoreOrganizerForQuit, resumeOrganizerSession, prepareToQuit };\nexport function setScreenshotTestWindow(window) { mainWindow = window };\nexport function stopWidgetTestWindows() { isQuitting = true; for (const window of widgetWindows.values()) window.destroy() };\n'
+      source += '\nif (process.platform === "win32") workspaceOwnership = await acquireWorkspaceOwnership(dataDirectory());\nstartupReady = true;\nexport async function releaseTestOwnership() { await workspaceOwnership?.release() }\n'
+      source += '\nexport { registerIpc, restoreOrganizerForQuit, resumeOrganizerSession, prepareToQuit, toolboxRuntime };\nexport function setScreenshotTestWindow(window) { mainWindow = window };\nexport function stopWidgetTestWindows() { isQuitting = true; for (const window of widgetWindows.values()) window.destroy() };\n'
       for (const [name, directory] of Object.entries({ DATA: data, USER_DATA: path.join(root, 'user-data'), DESKTOP: path.join(root, 'desktop') })) {
         source = source.replaceAll(`process.env.DUSTDESK_TEST_${name}_DIR`, JSON.stringify(directory))
       }
@@ -94,7 +101,7 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     let output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
     for (const match of [...output.matchAll(/(?:from\s*|import\s*\()(['"])([^'"]+)\1/g)]) {
       const specifier = match[2]
-      const replacement = mockUrls.get(specifier) ?? (specifier.startsWith('.') ? await compile(path.resolve(path.dirname(sourcePath), specifier + '.ts')) : ['selfsigned', 'yazl'].includes(specifier) ? pathToFileURL(require.resolve(specifier)).href : specifier)
+      const replacement = mockUrls.get(specifier) ?? (specifier.startsWith('.') ? await compile(path.resolve(path.dirname(sourcePath), specifier + '.ts')) : ['selfsigned', 'yazl', 'xlsx'].includes(specifier) ? pathToFileURL(require.resolve(specifier)).href : specifier)
       output = output.replaceAll(`${match[1]}${specifier}${match[1]}`, JSON.stringify(replacement))
     }
     await fs.mkdir(path.dirname(target), { recursive: true })
@@ -102,6 +109,7 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     return url
   }
   const main = await import(await compile(path.join(sourceRoot, 'main', 'index.ts')))
+  releaseOwnership = main.releaseTestOwnership
   shutdownWidgets = main.stopWidgetTestWindows
   main.registerIpc()
   let nextClient = 0
@@ -116,5 +124,5 @@ export async function mainFixture(t, { screenshotWindows = false, widgetWindows 
     }
   }
   const invoke = client()
-  return { root, data, electron, fileSystem, childProcess, shortcutCalls, invoke, client, windows: virtualWindows, handlers, load: () => invoke('workspace:load'), restoreOrganizerForQuit: main.restoreOrganizerForQuit, resumeOrganizerSession: main.resumeOrganizerSession, prepareToQuit: main.prepareToQuit }
+  return { root, data, electron, fileSystem, childProcess, shortcutCalls, invoke, client, windows: virtualWindows, handlers, toolboxRuntime: main.toolboxRuntime, load: () => invoke('workspace:load'), restoreOrganizerForQuit: main.restoreOrganizerForQuit, resumeOrganizerSession: main.resumeOrganizerSession, prepareToQuit: main.prepareToQuit }
 }

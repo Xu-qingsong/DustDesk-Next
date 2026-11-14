@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "runtime-import-worker"
+description = "Use only the native owned archive and actual bound browser to persist and verify startup import."
+commands.allow = ["runtime_drafts_step"]

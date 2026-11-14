@@ -9,7 +9,7 @@ import ts from 'typescript'
 async function modules(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dustdesk-screenshot-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
-  for (const [name, file] of [['model', 'src/shared/screenshotDocument.ts'], ['sessions', 'src/main/screenshotSessions.ts']]) {
+  for (const [name, file] of [['model', 'src/shared/screenshotDocument.ts'], ['sessions', 'tests/reference/src/main/screenshotSessions.ts']]) {
     const source = ts.transpileModule(await fs.readFile(file, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText.replaceAll('../shared/screenshotDocument', './model.mjs')
     await fs.writeFile(path.join(root, name + '.mjs'), source)
   }

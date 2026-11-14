@@ -1,0 +1,7 @@
+{
+  "$schema":"../gen/schemas/desktop-schema.json",
+  "identifier":"widgets",
+  "description":"Native widget instances with Rust-owned business scope",
+  "windows":["workspace-widget-*"],
+  "permissions":["widget"]
+}

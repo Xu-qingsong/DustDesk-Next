@@ -9,7 +9,6 @@ import { normalizeSidebarPreferences } from '../../../shared/sidebar'
 import { Overview } from '../pages/Overview'
 import { Sidebar } from '../components/Sidebar'
 import { Topbar } from '../components/Topbar'
-import { useClipboardSubscription } from '../hooks/useClipboardSubscription'
 import { useFileSearch } from '../hooks/useFileSearch'
 import { useWorkspace } from '../hooks/useWorkspace'
 import { WidgetVisibilityProvider } from '../hooks/useWidgetVisibility'
@@ -45,9 +44,13 @@ export function App() {
   const [visitedTools, setVisitedTools] = useState<Page[]>([])
   const [page, setPage] = useState<Page>('overview'); const [query, setQuery] = useState(''); const [screenshotImage, setScreenshotImage] = useState<{ dataUrl: string } | null>(null)
   const [settingsAnchor, setSettingsAnchor] = useState<SettingsAnchor>()
+  useEffect(() => window.dustdesk.onMainWindowReleaseCheck(() =>
+    loaded && page === 'overview' && !query && visitedTools.length === 0 &&
+    !document.querySelector('[role="dialog"], [role="alertdialog"], .widget-picker, [data-sonner-toast]') &&
+    [...document.querySelectorAll('input')].every(input => !input.value)
+  ), [loaded, page, query, visitedTools])
   const theme = state.Settings.Theme === 'dark' ? 'dark' : 'light'
   const setTheme = (next: 'light' | 'dark') => { void persist({ ...state, Settings: { ...state.Settings, Theme: next } }, '主题已保存') }
-  useClipboardSubscription(state, persist)
   const [searchNavigation, setSearchNavigation] = useState<SearchNavigation>()
   const searchSequence = useRef(0)
   const navigatePage = (next: Page) => { setSearchNavigation(undefined); if (next !== 'settings') setSettingsAnchor(undefined); if (['textTools','imageTools','lan','screenshot'].includes(next)) setVisitedTools(current => current.includes(next) ? current : [...current, next]); setPage(next) }

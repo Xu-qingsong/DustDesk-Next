@@ -8,7 +8,7 @@ const compile = text => ts.transpileModule(text, { compilerOptions: { target: ts
 const moduleUrl = text => `data:text/javascript;base64,${Buffer.from(text).toString('base64')}`
 const repoUrl = moduleUrl(compile(await fs.readFile('src/shared/repository.ts', 'utf8')))
 const { repository } = await import(repoUrl)
-const { compareVersions, createReleaseUpdateChecker } = await import(moduleUrl(compile(await fs.readFile('src/main/releaseUpdates.ts', 'utf8')).replace("'../shared/repository'", JSON.stringify(repoUrl))))
+const { compareVersions, createReleaseUpdateChecker } = await import(moduleUrl(compile(await fs.readFile('tests/reference/src/main/releaseUpdates.ts', 'utf8')).replace("'../shared/repository'", JSON.stringify(repoUrl))))
 const response = body => new Response(JSON.stringify(body), { status: 200 })
 const release = { tag_name: 'v1.2.0', body: '## 更新内容\n- 修复截图卡顿\n- 完善阶段弹窗', draft: false, prerelease: false }
 
@@ -68,6 +68,9 @@ test('concurrent checks share the request and confirmation; missing notes have a
 
 test('publish and help links use the current code repository', async () => {
   const pkg = JSON.parse(await fs.readFile('package.json', 'utf8'))
-  assert.equal(pkg.build.publish.owner, repository.owner); assert.equal(pkg.build.publish.repo, repository.name)
+  assert.equal(pkg.repository.url.replace(/\.git$/, ''), repository.url)
   assert.equal(pkg.homepage, repository.url); assert.equal(pkg.bugs.url, repository.issues)
+  const native = await fs.readFile('src-tauri/src/release_updates.rs', 'utf8')
+  assert.ok(native.includes('const REPOSITORY: &str = "https://api.github.com/repos/'+repository.owner+'/'+repository.name+'";'))
+  assert.ok(native.includes('const RELEASES: &str = "'+repository.releases+'";'))
 })

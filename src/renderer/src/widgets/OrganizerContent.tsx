@@ -1,4 +1,4 @@
-import { useId, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useState, type CSSProperties } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DesktopCategoryRecord } from '../../../shared/types'
@@ -14,7 +14,7 @@ function OrganizerFile({ path, size }: { path: string; size: number }) {
   }
   return <button className="organizer-file" title={path} aria-label={name} onClick={() => void open()} onContextMenu={event => {
     event.preventDefault()
-    void window.dustdesk.showPathContextMenu(path).catch(() => toast.error('无法打开文件菜单'))
+    void window.dustdesk.showPathContextMenu(path).then(result => { if (!result.ok) toast.error(result.error || '无法打开文件菜单') }).catch(() => toast.error('无法打开文件菜单'))
   }}>
     <PathIcon path={path} size={size} className="path-icon organizer-file-icon" />
     <span className="organizer-file-name">{name}</span>
@@ -24,6 +24,7 @@ function OrganizerFile({ path, size }: { path: string; size: number }) {
 export function OrganizerContent({ categories, iconSize }: { categories: DesktopCategoryRecord[]; iconSize: number }) {
   const [selectedId, setSelectedId] = useState(() => (categories.find(category => category.ItemPaths.length) ?? categories[0])?.Id)
   const selected = categories.find(category => category.Id === selectedId) ?? categories.find(category => category.ItemPaths.length) ?? categories[0]
+  useEffect(() => window.dustdesk.onMainWindowReleaseCheck(() => selected?.Id === (categories.find(category => category.ItemPaths.length) ?? categories[0])?.Id), [selected, categories])
   const id = useId()
   const size = Number.isFinite(iconSize) ? Math.max(24, Math.min(96, iconSize)) : 48
   if (!selected) return <div className="widget-empty"><FolderOpen size={24} />暂无收纳分类</div>

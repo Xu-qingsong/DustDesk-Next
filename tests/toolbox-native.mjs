@@ -26,14 +26,45 @@ try {
   const page=first.window, source=path.join(first.tempRoot,'拖入.png')
   const png=await page.evaluate(async()=>{const canvas=document.createElement('canvas');canvas.width=12;canvas.height=8;const ctx=canvas.getContext('2d');ctx.fillStyle='#087f6c';ctx.fillRect(0,0,12,8);return [...new Uint8Array(await (await new Promise(resolve=>canvas.toBlob(resolve))).arrayBuffer())]})
   await fs.writeFile(source,Buffer.from(png))
+  await page.evaluate(()=>{window.__nativeDropPackets=[];window.dustdesk.onFilesDropped(packet=>{window.__nativeDropPackets.push(packet);return false})})
   await page.locator('.sidebar').getByText('图片工具箱',{exact:true}).click()
   await page.locator('.image-tool-layout').waitFor()
   await page.evaluate(()=>{const input=document.createElement('input');input.type='file';input.id='native-toolbox-file';document.body.append(input)})
   await page.locator('#native-toolbox-file').setInputFiles(source)
   const paths=await page.evaluate(()=>window.dustdesk.getDroppedPaths([...document.querySelector('#native-toolbox-file').files]))
   assert.equal(paths[0],source,'Electron webUtils must retain the native path')
-  await page.evaluate(()=>{const dt=new DataTransfer();dt.items.add(document.querySelector('#native-toolbox-file').files[0]);document.querySelector('.toolbox-page:has(.image-tool-layout)').dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:dt}));document.querySelector('#native-toolbox-file').remove()})
+  await page.evaluate(()=>{
+    const target=document.querySelector('.toolbox-page:has(.image-tool-layout)'),bounds=target.getBoundingClientRect()
+    const dt=new DataTransfer();dt.items.add(document.querySelector('#native-toolbox-file').files[0])
+    target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:dt,clientX:bounds.left+bounds.width/2,clientY:bounds.top+24}))
+    document.querySelector('#native-toolbox-file').remove()
+  })
   await page.locator('.image-tool-thumb').waitFor()
+  assert.equal(await page.locator('.image-tool-row').count(),1,'Preload routing and DOM fallback must not duplicate the import')
+  assert.deepEqual(await page.evaluate(()=>window.__nativeDropPackets.map(packet=>packet.paths)),[[source]])
+  await page.locator('.sidebar').getByText('截图编辑',{exact:true}).click()
+  await page.locator('.screenshot-page').waitFor()
+  await page.evaluate(()=>{const input=document.createElement('input');input.type='file';input.id='native-screenshot-file';document.body.append(input)})
+  await page.locator('#native-screenshot-file').setInputFiles(source)
+  await page.evaluate(()=>{
+    const target=document.querySelector('.screenshot-page'),bounds=target.getBoundingClientRect()
+    const dt=new DataTransfer();dt.items.add(document.querySelector('#native-screenshot-file').files[0])
+    target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:dt,clientX:bounds.left+bounds.width/2,clientY:bounds.top+24}))
+    document.querySelector('#native-screenshot-file').remove()
+  })
+  await page.waitForFunction(()=>document.querySelector('.selection-size')?.textContent==='12 × 8 px'&&document.querySelector('button[aria-label="复制"]')?.disabled===false)
+  assert.deepEqual(await page.evaluate(()=>window.__nativeDropPackets.map(packet=>packet.paths)),[[source],[source]],'The actual File must route through the screenshot path import without a second DOM import')
+  for(const target of [path.dirname(source),path.join(first.tempRoot,'未拖入.png')])assert.equal((await page.evaluate(target=>window.dustdesk.createScreenshotDocument({path:target}),target)).ok,false,'Preload screenshot imports must not read arbitrary paths')
+  await page.evaluate(bytes=>{
+    const target=document.querySelector('.screenshot-page'),bounds=target.getBoundingClientRect()
+    const transfer=new DataTransfer();transfer.items.add(new File([new Uint8Array(bytes)],'browser-only.png',{type:'image/png'}))
+    target.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:transfer,clientX:bounds.left+bounds.width/2,clientY:bounds.top+24}))
+  },png)
+  await page.waitForFunction(()=>!document.querySelector('.screenshot-page [role="status"]')&&document.querySelector('button[aria-label="复制"]')?.disabled===false)
+  assert.equal(await page.locator('.screenshot-import-error').count(),0,'Browser-only File imports retain the byte fallback')
+  assert.equal((await page.evaluate(target=>window.dustdesk.createScreenshotDocument({path:target}),source)).ok,false,'A new browser-only drop revokes the previous cached native File')
+  await page.locator('.sidebar').getByText('图片工具箱',{exact:true}).click()
+  assert.equal(await page.locator('.image-tool-row').count(),1,'A hidden image toolbox cannot consume the screenshot drop')
   // Mock the native clipboard boundary without modifying the user's real clipboard.
   await first.electronApp.evaluate(({clipboard,nativeImage},bytes)=>{clipboard.readImage=()=>nativeImage.createFromBuffer(Buffer.from(bytes));clipboard.readText=()=>''},png)
   await page.getByRole('button',{name:'粘贴图片',exact:true}).click();await page.getByText('剪贴板.png',{exact:true}).waitFor()
@@ -55,7 +86,17 @@ try {
   await page.locator('.sidebar').getByText('局域网传输',{exact:true}).click()
   await second.window.locator('.sidebar').getByText('局域网传输',{exact:true}).click()
   await page.getByRole('button',{name:'开启局域网传输',exact:true}).click();await second.window.getByRole('button',{name:'开启局域网传输',exact:true}).click()
+  for (const target of [page, second.window]) {
+    const deadline = Date.now() + 15000
+    while (Date.now() < deadline) {
+      const value = await target.evaluate(() => window.dustdesk.toolbox.lanSnapshot())
+      if (value.enabled && value.port > 0) break
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    assert.ok((await target.evaluate(() => window.dustdesk.toolbox.lanSnapshot())).enabled, (await target.locator('.toolbox-page').allTextContents()).join('\n'))
+  }
   const state=await second.window.evaluate(()=>window.dustdesk.toolbox.lanSnapshot())
+  assert.ok(Number.isInteger(state.port) && state.port > 0, JSON.stringify(state))
   const device=await page.evaluate(port=>window.dustdesk.toolbox.lanConnect('127.0.0.1',port),state.port)
   const pairs=await Promise.all([first.electronApp.evaluate(()=>globalThis.__toolboxDialogs.filter(d=>d.title==='局域网设备配对')),second.electronApp.evaluate(()=>globalThis.__toolboxDialogs.filter(d=>d.title==='局域网设备配对'))])
   assert.equal(pairs[0].length,1);assert.equal(pairs[1].length,1);assert.equal(pairs[0][0].detail.match(/\b\d{6}\b/)[0],pairs[1][0].detail.match(/\b\d{6}\b/)[0])
@@ -86,7 +127,7 @@ try {
     assert.equal((await page.evaluate(()=>window.dustdesk.toolbox.lanSnapshot())).tasks.find(task=>task.id===failed.id).status,'completed')
   }
   await page.setViewportSize({width:1280,height:800});await page.screenshot({path:'test-artifacts/toolbox-native.png'})
-  console.log(JSON.stringify({nativeDrop:true,clipboardImport:true,imageExport:true,tlsPairing:true,trayReceive:true,fileFolderText:true,lockedSourceRetry:process.platform==='win32'}))
+  console.log(JSON.stringify({nativeDrop:true,sharedDropRouting:true,screenshotExactFileAuthority:true,screenshotNativeFileFallback:true,clipboardImport:true,imageExport:true,tlsPairing:true,trayReceive:true,fileFolderText:true,lockedSourceRetry:process.platform==='win32'}))
   // Exercise the normal before-quit path, including durable transfer state.
   await first.electronApp.evaluate(({app})=>{setTimeout(()=>app.quit(),10)})
   await new Promise(resolve=>first.electronApp.once('close',resolve))

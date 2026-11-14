@@ -1,0 +1,33 @@
+[[permission]]
+identifier = "workspace"
+description = "Workspace main window only; Rust verifies each caller."
+commands.allow = ["hotkeys_set", "hotkeys_status", "quick_capture_show", "quick_capture_request_hide", "workspace_load", "workspace_save", "workspace_initialize", "workspace_location", "workspace_platform", "workspace_productivity", "workspace_backup_create", "workspace_backup_list", "workspace_backup_preview", "workspace_backup_restore", "workspace_backup_status", "workspace_note_image", "workspace_note_import", "workspace_note_pick", "workspace_note_clear", "workspace_resources_check", "workspace_resources_cancel", "system_cancel_picker", "system_open", "system_pick", "system_icon", "system_path_menu", "system_desktop_entries", "system_search_files", "system_search_cancel", "system_sample", "system_startup", "clipboard_read", "clipboard_write", "clipboard_preview", "workspace_organizer", "workspace_window", "application_quit", "application_flushed", "window_release_ready", "drafts_prepare", "drafts_checkpoint_ready", "drafts_end"]
+[[permission]]
+identifier = "draft-verifier"
+description = "Read-only receipt verification for the current maintenance checkpoint; no paths or import mutation."
+commands.allow = ["drafts_verify"]
+
+[[permission]]
+identifier = "draft-export"
+description = "Native main-window draft export after all-editor checkpoint; no renderer paths, contents or provenance arguments."
+commands.allow = ["drafts_export"]
+
+[[permission]]
+identifier = "data-snapshot"
+description = "Native main-window Data-only preparation after all-editor maintenance; no renderer paths, receipts, checkpoint or restore arguments."
+commands.allow = ["data_snapshot_prepare"]
+
+[[permission]]
+identifier = "handoff-snapshot"
+description = "Native main-window composition of Data, controlled browser drafts and original-profile LAN checkpoint under one maintenance lease; no renderer sources, destinations, receipts or restore arguments."
+commands.allow = ["handoff_snapshot_prepare"]
+
+[[permission]]
+identifier = "legacy-source-inspection"
+description = "Main-window native folder selection and compiled release-byte identification only; no renderer paths, digests, trust receipts, production data access or takeover."
+commands.allow = ["legacy_source_inspect"]
+
+[[permission]]
+identifier = "draft-transaction"
+description = "Isolated native transaction decisions; unresolved records block workspace access and cannot be acknowledged by renderer flags."
+commands.allow = ["drafts_transaction", "drafts_recovery"]

@@ -40,7 +40,7 @@ try {
 
   await navigate('设置')
   await app.window.getByRole('button', { name: '打开快速记录', exact: true }).click()
-  const capture = app.electronApp.windows().find(page => page.url().includes('capture=')) ?? await app.electronApp.waitForEvent('window')
+  let capture = app.electronApp.windows().find(page => page.url().includes('capture=')) ?? await app.electronApp.waitForEvent('window')
   await capture.getByLabel('记录标题').fill('Captured from shortcut window')
   await capture.getByLabel('记录正文').fill('capture details')
   for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
@@ -53,10 +53,14 @@ try {
   await capture.getByLabel('记录正文').press('Control+Enter')
   await waitForState(state => state.Todos.some(item => item.Title === 'Captured from shortcut window'))
   await app.window.evaluate(() => window.dustdesk.showQuickCapture())
+  capture = app.electronApp.windows().find(page => !page.isClosed() && page.url().includes('capture=')) ?? await app.electronApp.waitForEvent('window')
+  await capture.getByLabel('记录标题').waitFor()
   assert.equal(await capture.getByLabel('记录标题').inputValue(), '')
   await capture.getByLabel('记录标题').fill('unsaved draft')
   await capture.getByLabel('记录标题').press('Escape')
   await app.window.evaluate(() => window.dustdesk.showQuickCapture())
+  capture = app.electronApp.windows().find(page => !page.isClosed() && page.url().includes('capture=')) ?? await app.electronApp.waitForEvent('window')
+  await capture.getByLabel('记录标题').waitFor()
   assert.equal(await capture.getByLabel('记录标题').inputValue(), 'unsaved draft')
   await app.window.evaluate(() => window.dustdesk.hideQuickCapture())
   assert.equal((await app.window.evaluate(() => window.dustdesk.setHotkeys({ quickCapture: 'Ctrl+Shift+K' }))).ok, false)
